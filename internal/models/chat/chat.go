@@ -113,6 +113,7 @@ type ChatConfig struct {
 	CustomHeaders map[string]string
 	AppID         string
 	AppSecret     string // 加密值，由工厂函数调用方传入，在 NewWeKnoraCloudChat 中使用前已解密
+	Recorder      types.ModelCallRecorder
 }
 
 // ConfigFromModel 根据 types.Model 构造 ChatConfig。
@@ -154,7 +155,8 @@ func NewChat(config *ChatConfig, ollamaService *ollama.OllamaService) (Chat, err
 	c, err = wrapChatLangfuse(c, err)
 	// Outermost: hold the per-model concurrency slot only around the real
 	// provider round-trip, so the wait is excluded from debug/langfuse timing.
-	return wrapChatConcurrency(c, config.MaxConcurrency, err)
+	c, err = wrapChatConcurrency(c, config.MaxConcurrency, err)
+	return wrapChatMetering(c, config, err)
 }
 
 // NewRemoteChat 根据 provider 创建远程聊天实例。

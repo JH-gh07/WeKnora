@@ -52,6 +52,19 @@ func runStartupBootstrap(c *dig.Container) {
 		logger.Warnf(ctx, "[bootstrap] failed to resolve TenantAPIKeyService: %v", err)
 	}
 
+	// Single-worker reconciliation: any persisted RUNNING evaluation run from a
+	// previous process is marked INTERRUPTED and its temporary resources are
+	// discovered/cleaned. Best-effort, non-fatal.
+	if err := c.Invoke(func(evalSvc interfaces.EvaluationService) {
+		if n, err := evalSvc.ReconcileInterruptedRuns(ctx); err != nil {
+			logger.Warnf(ctx, "[bootstrap] evaluation run reconciliation failed: %v", err)
+		} else if n > 0 {
+			logger.Infof(ctx, "[bootstrap] reconciled %d interrupted evaluation run(s)", n)
+		}
+	}); err != nil {
+		logger.Warnf(ctx, "[bootstrap] failed to resolve EvaluationService: %v", err)
+	}
+
 	email := strings.TrimSpace(os.Getenv(bootstrapEnvVar))
 	if email == "" {
 		return

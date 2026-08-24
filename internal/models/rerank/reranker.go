@@ -90,6 +90,7 @@ type RerankerConfig struct {
 	CustomHeaders map[string]string
 	AppID         string
 	AppSecret     string // 加密值，工厂函数调用方传入，使用前已解密
+	Recorder      types.ModelCallRecorder
 }
 
 // ConfigFromModel 根据 types.Model 构造 RerankerConfig。
@@ -122,7 +123,8 @@ func NewReranker(config *RerankerConfig) (Reranker, error) {
 	if logger.LLMDebugEnabled() {
 		r = &debugReranker{inner: r}
 	}
-	return wrapRerankerLangfuse(r, nil)
+	r, err = wrapRerankerLangfuse(r, nil)
+	return wrapRerankerMetering(r, config, err)
 }
 
 // customHeaderSetter 表示支持注入自定义 HTTP header 的 reranker 实现。

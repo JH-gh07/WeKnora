@@ -58,6 +58,7 @@ type Config struct {
 	CustomHeaders map[string]string `json:"custom_headers"`
 	AppID         string
 	AppSecret     string // 加密值，工厂函数调用方传入，使用前已解密
+	Recorder      types.ModelCallRecorder
 }
 
 // ConfigFromModel 根据 types.Model 构造 embedding.Config。
@@ -104,7 +105,7 @@ func NewEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 	if langfuse.GetManager().Enabled() {
 		e = &langfuseEmbedder{inner: e}
 	}
-	return e, nil
+	return wrapEmbeddingMetering(e, config), nil
 }
 
 func newEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.OllamaService) (Embedder, error) {
