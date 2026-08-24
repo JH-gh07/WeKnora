@@ -2,7 +2,7 @@
 
 ```yaml
 document_type: ADR Registry
-version: 0.1
+version: 0.2
 status: ACTIVE
 created_at: 2026-08-25
 architecture_source: ../requirement_matrix.md
@@ -39,6 +39,8 @@ A Registry entry may move to `ACCEPTED` only when its owning test/Evidence is id
 | ADR-008 | Do not introduce a global Model Gateway for P0 | `ACCEPTED` | G2A | Additional model families cause verified duplication or drift |
 | ADR-009 | Local Embedding Cache and Provider Prompt Cache use separate facts and metrics | `ACCEPTED_DESIGN` | G3/G4 | A provider exposes a single verifiable semantic contract |
 | ADR-010 | Availability state is separate from nullable metric value | `ACCEPTED_DESIGN` | G2B | API/UI compatibility review requires a versioned replacement |
+| ADR-011 | Failure authority depends on fact class | `ACCEPTED_DESIGN` | G1–G6 | Runtime Evidence proves a safer replacement policy |
+| ADR-012 | Latency budgets are declared before ON measurements | `ACCEPTED_DESIGN` | G3/G6 | Repository-wide SLO/performance policy supersedes it |
 
 ## ADR-001 — Protocol and provenance are different facts
 
@@ -231,6 +233,49 @@ Availability uses `AVAILABLE`, `NOT_IMPLEMENTED`, `UNSUPPORTED`, `UNREPORTED`, o
 - `sample_count=0` does not prove the metric is zero.
 - API, UI, and reports must share one truth-table fixture.
 - G2B owns implementation verification; until then this is `ACCEPTED_DESIGN`.
+
+## ADR-011 — Failure authority depends on fact class
+
+### Context
+
+Failing every operation closed would let metering or cache outages break successful business calls. Failing every operation open would create orphan resources, false completion, unauthorized access, or unreliable merge decisions.
+
+### Decision
+
+- Control facts—Run identity/lifecycle, authorization, baseline promotion, migration and comparison identity—fail closed.
+- Observation persistence fails open for the business result but degrades Measurement Health to `PARTIAL/UNKNOWN`.
+- Cache failures use only correctness-preserving provider fallback and never return unverified/corrupt data.
+- Required governance checks fail closed to merge while distinguishing `BLOCK`, `NOT_COMPARABLE`, and `ERROR`.
+
+### Consequences and boundary
+
+- A persistence failure cannot be hidden as a successful durable fact.
+- Metering failure cannot trigger a duplicate provider call merely to recreate telemetry.
+- Cache fallback must retain tenant/model/computation identity and report degraded availability.
+- Diagnosis may state attribution only when trace, diff, or controlled reproduction supports it.
+- This is a semantic contract; each owning Gate still needs failure-injection Evidence.
+
+### Evidence locator
+
+Current Run and Metering evidence is shared-workspace-relative under `../../../status/evidence/task002/` and `../../../status/evidence/task003/`; Cache and Regression failure Evidence is pending G3/G5/G6.
+
+## ADR-012 — Latency budget before measurement
+
+### Context
+
+Reporting p50/p95 after implementation does not define whether added latency is acceptable and allows thresholds to be selected after seeing the result. Summing overlapping or asynchronous spans also overstates critical-path overhead.
+
+### Decision
+
+Any Task adding synchronous work to a request path declares its fixture, SLO/headroom or engineering budget, absolute/relative limits, sample plan and failure action before viewing ON results. Final judgment uses paired OFF/ON deltas and only sums mutually exclusive critical-path spans.
+
+### Consequences and boundary
+
+- If no SLO/headroom or pre-approved budget exists, the verdict is `MEASURED / DECISION_PENDING`, not retroactive PASS.
+- Local deterministic defaults are 5 warmups, 3 independent rounds and at least 30 measured samples per round, with raw samples, p50, p95 and MAD.
+- Real-provider latency remains advisory and uses counter-balanced ordering with disclosed failures.
+- Existing Task003 measurements remain historical facts; v0.2 does not invent a threshold after the run.
+- A later repository-wide SLO/performance policy may supersede this compact decision.
 
 ## Change protocol
 
