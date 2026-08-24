@@ -31,6 +31,45 @@ type modelService struct {
 	ollamaService *ollama.OllamaService
 	pooler        embedding.EmbedderPooler
 	tenantService interfaces.TenantService
+	callRecorder  types.ModelCallRecorder
+}
+
+// NewMeteredModelService is the production constructor. The unmetered
+// constructor remains available to narrow unit tests and explicit model
+// connection checks that must not be counted as business usage.
+func NewMeteredModelService(repo interfaces.ModelRepository,
+	kbRepo interfaces.KnowledgeBaseRepository,
+	agentRepo interfaces.CustomAgentRepository,
+	ollamaService *ollama.OllamaService,
+	pooler embedding.EmbedderPooler,
+	tenantService interfaces.TenantService,
+	callRecorder interfaces.ModelCallRepository,
+) interfaces.ModelService {
+	svc := NewModelService(repo, kbRepo, agentRepo, ollamaService, pooler, tenantService).(*modelService)
+	svc.callRecorder = callRecorder
+	return svc
+}
+
+func (s *modelService) embeddingConfig(model *types.Model, appID, appSecret string) embedding.Config {
+	cfg := embedding.ConfigFromModel(model, appID, appSecret)
+	cfg.Recorder = s.callRecorder
+	return cfg
+}
+
+func (s *modelService) chatConfig(model *types.Model, appID, appSecret string) *chat.ChatConfig {
+	cfg := chat.ConfigFromModel(model, appID, appSecret)
+	if cfg != nil {
+		cfg.Recorder = s.callRecorder
+	}
+	return cfg
+}
+
+func (s *modelService) rerankerConfig(model *types.Model, appID, appSecret string) *rerank.RerankerConfig {
+	cfg := rerank.ConfigFromModel(model, appID, appSecret)
+	if cfg != nil {
+		cfg.Recorder = s.callRecorder
+	}
+	return cfg
 }
 
 // NewModelService creates a new model service instance
@@ -445,7 +484,7 @@ func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (e
 
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
-	embedder, err := embedding.NewEmbedder(embedding.ConfigFromModel(model, appID, appSecret), s.pooler, s.ollamaService)
+	embedder, err := embedding.NewEmbedder(s.embeddingConfig(model, appID, appSecret), s.pooler, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -492,7 +531,7 @@ func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId s
 
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
-	embedder, err := embedding.NewEmbedder(embedding.ConfigFromModel(model, appID, appSecret), s.pooler, s.ollamaService)
+	embedder, err := embedding.NewEmbedder(s.embeddingConfig(model, appID, appSecret), s.pooler, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -522,7 +561,7 @@ func (s *modelService) GetRerankModel(ctx context.Context, modelId string) (rera
 
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
-	reranker, err := rerank.NewReranker(rerank.ConfigFromModel(model, appID, appSecret))
+	reranker, err := rerank.NewReranker(s.rerankerConfig(model, appID, appSecret))
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -565,7 +604,7 @@ func (s *modelService) GetChatModel(ctx context.Context, modelId string) (chat.C
 
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
-	chatModel, err := chat.NewChat(chat.ConfigFromModel(model, appID, appSecret), s.ollamaService)
+	chatModel, err := chat.NewChat(s.chatConfig(model, appID, appSecret), s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,

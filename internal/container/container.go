@@ -179,6 +179,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewMemoryRepository))
 	must(container.Provide(repository.NewTaskPendingOpsRepository))
 	must(container.Provide(repository.NewTaskDeadLetterRepository))
+	must(container.Provide(repository.NewEvaluationRunRepository))
+	must(container.Provide(repository.NewTemporaryKnowledgeBaseFinder))
+	must(container.Provide(repository.NewModelCallRepository))
 
 	// MCP manager for managing MCP client connections
 	logger.Debugf(ctx, "[Container] Registering MCP manager...")
@@ -212,9 +215,18 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewChunkService))
 	must(container.Provide(service.NewKnowledgeTagService))
 	must(container.Provide(embedding.NewBatchEmbedder))
-	must(container.Provide(service.NewModelService))
+	must(container.Provide(service.NewMeteredModelService))
 	must(container.Provide(service.NewDatasetService))
+	must(container.Provide(func() service.EvaluationBuildInfo {
+		return service.EvaluationBuildInfo{
+			GitCommit:  handler.CommitID,
+			AppVersion: handler.Version,
+			BuildTime:  handler.BuildTime,
+			GoVersion:  handler.GoVersion,
+		}
+	}))
 	must(container.Provide(service.NewEvaluationService))
+	must(container.Provide(service.NewModelUsageService))
 	must(container.Provide(service.NewUserService))
 	must(container.Provide(service.NewSystemSettingService))
 	must(container.Provide(func(
@@ -391,6 +403,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewModelHandler))
 	must(container.Provide(handler.NewSandboxConfigHandler))
 	must(container.Provide(handler.NewEvaluationHandler))
+	must(container.Provide(handler.NewModelUsageHandler))
 	must(container.Provide(handler.NewInitializationHandler))
 	must(container.Provide(handler.NewAuthHandler))
 	must(container.Provide(handler.NewSystemHandler))

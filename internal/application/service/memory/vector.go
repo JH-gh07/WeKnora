@@ -73,6 +73,7 @@ func (s *Service) embedText(
 	}
 	callCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	callCtx = types.WithLLMCallMetadata(callCtx, "agent_memory", "")
 	vector, err := embedder.Embed(callCtx, text)
 	if err != nil {
 		logger.Warnf(ctx, "memory: embed failed: %v", err)

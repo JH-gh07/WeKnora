@@ -64,6 +64,7 @@ type InitializationHandler struct {
 	documentReader   interfaces.DocumentReader
 	pooler           embedding.EmbedderPooler
 	storageResolver  interfaces.StorageBackendResolver
+	callRecorder     interfaces.ModelCallRepository
 }
 
 // NewInitializationHandler 创建初始化处理器
@@ -78,6 +79,7 @@ func NewInitializationHandler(
 	documentReader interfaces.DocumentReader,
 	pooler embedding.EmbedderPooler,
 	storageResolver interfaces.StorageBackendResolver,
+	callRecorder interfaces.ModelCallRepository,
 ) *InitializationHandler {
 	return &InitializationHandler{
 		config:           config,
@@ -90,6 +92,7 @@ func NewInitializationHandler(
 		documentReader:   documentReader,
 		pooler:           pooler,
 		storageResolver:  storageResolver,
+		callRecorder:     callRecorder,
 	}
 }
 
@@ -1753,6 +1756,7 @@ func (h *InitializationHandler) resolveTenantWeKnoraCloudCreds(ctx context.Conte
 // @Router       /initialization/remote/check [post]
 func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 	ctx := c.Request.Context()
+	ctx = types.WithLLMCallMetadata(ctx, "connection_test", "")
 
 	logger.Info(ctx, "Checking remote model connection")
 
@@ -1810,6 +1814,7 @@ func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 // @Router       /initialization/embedding/test [post]
 func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 	ctx := c.Request.Context()
+	ctx = types.WithLLMCallMetadata(ctx, "connection_test", "")
 
 	logger.Info(ctx, "Testing embedding model connectivity and functionality")
 
@@ -1857,7 +1862,9 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 	}
 
 	model := h.buildTestModel(&req, types.ModelTypeEmbedding, types.ModelSourceRemote)
-	emb, err := embedding.NewEmbedder(embedding.ConfigFromModel(model, appID, appSecret), h.pooler, h.ollamaService)
+	embCfg := embedding.ConfigFromModel(model, appID, appSecret)
+	embCfg.Recorder = h.callRecorder
+	emb, err := embedding.NewEmbedder(embCfg, h.pooler, h.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"model": utils.SanitizeForLog(req.ModelName)})
 		c.JSON(http.StatusOK, gin.H{
@@ -1913,7 +1920,11 @@ func classifyConnectionError(errMsg string) string {
 func (h *InitializationHandler) checkChatModelConnection(
 	ctx context.Context, model *types.Model, appID, appSecret string,
 ) (bool, string) {
-	chatInstance, err := chat.NewChat(chat.ConfigFromModel(model, appID, appSecret), h.ollamaService)
+	chatCfg := chat.ConfigFromModel(model, appID, appSecret)
+	if chatCfg != nil {
+		chatCfg.Recorder = h.callRecorder
+	}
+	chatInstance, err := chat.NewChat(chatCfg, h.ollamaService)
 	if err != nil {
 		return false, fmt.Sprintf("创建聊天实例失败: %v", err)
 	}
@@ -1949,7 +1960,11 @@ func (h *InitializationHandler) checkChatModelConnection(
 func (h *InitializationHandler) checkRerankModelConnection(
 	ctx context.Context, model *types.Model, appID, appSecret string,
 ) (bool, string) {
-	reranker, err := rerank.NewReranker(rerank.ConfigFromModel(model, appID, appSecret))
+	rerankCfg := rerank.ConfigFromModel(model, appID, appSecret)
+	if rerankCfg != nil {
+		rerankCfg.Recorder = h.callRecorder
+	}
+	reranker, err := rerank.NewReranker(rerankCfg)
 	if err != nil {
 		return false, fmt.Sprintf("创建Reranker失败: %v", err)
 	}
@@ -1978,6 +1993,7 @@ func (h *InitializationHandler) checkRerankModelConnection(
 // @Router       /initialization/rerank/check [post]
 func (h *InitializationHandler) CheckRerankModel(c *gin.Context) {
 	ctx := c.Request.Context()
+	ctx = types.WithLLMCallMetadata(ctx, "connection_test", "")
 
 	logger.Info(ctx, "Checking rerank model connection and functionality")
 

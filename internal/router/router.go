@@ -58,6 +58,7 @@ type RouterParams struct {
 	ModelCredentialsHandler      *handler.ModelCredentialsHandler
 	SandboxConfigHandler         *handler.SandboxConfigHandler
 	EvaluationHandler            *handler.EvaluationHandler
+	ModelUsageHandler            *handler.ModelUsageHandler
 	AuthHandler                  *handler.AuthHandler
 	InitializationHandler        *handler.InitializationHandler
 	SystemHandler                *handler.SystemHandler
@@ -266,6 +267,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterModelRoutes(v1, params.ModelHandler, params.ModelCredentialsHandler, rbacGuards)
 		RegisterSandboxConfigRoutes(v1, params.SandboxConfigHandler, rbacGuards)
 		RegisterEvaluationRoutes(v1, params.EvaluationHandler, rbacGuards)
+		RegisterModelUsageRoutes(v1, params.ModelUsageHandler, rbacGuards)
 		RegisterInitializationRoutes(v1, params.InitializationHandler, rbacGuards)
 		params.SystemHandler.BindDeploymentCapabilities(deploymentCapabilitiesFromRouter(params))
 		RegisterSystemRoutes(v1, params.SystemHandler, rbacGuards)

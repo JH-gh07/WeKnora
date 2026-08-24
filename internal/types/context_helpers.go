@@ -293,6 +293,32 @@ func LLMCallMetadataFromContext(ctx context.Context) (purpose, prefixFingerprint
 	return purpose, prefixFingerprint
 }
 
+// WithLLMCallScope carries optional run/task/trace identifiers without
+// changing existing callers. Empty values are omitted so ordinary Chat/Wiki/
+// RAG calls remain explicitly run_id=NULL in the ModelCall fact.
+func WithLLMCallScope(ctx context.Context, runID, taskID, traceID string) context.Context {
+	if strings.TrimSpace(runID) != "" {
+		ctx = context.WithValue(ctx, LLMRunIDContextKey, strings.TrimSpace(runID))
+	}
+	if strings.TrimSpace(taskID) != "" {
+		ctx = context.WithValue(ctx, LLMTaskIDContextKey, strings.TrimSpace(taskID))
+	}
+	if strings.TrimSpace(traceID) != "" {
+		ctx = context.WithValue(ctx, LLMTraceIDContextKey, strings.TrimSpace(traceID))
+	}
+	return ctx
+}
+
+func LLMCallScopeFromContext(ctx context.Context) (runID, taskID, traceID string) {
+	if ctx == nil {
+		return "", "", ""
+	}
+	runID, _ = ctx.Value(LLMRunIDContextKey).(string)
+	taskID, _ = ctx.Value(LLMTaskIDContextKey).(string)
+	traceID, _ = ctx.Value(LLMTraceIDContextKey).(string)
+	return
+}
+
 // LanguageFromContext extracts the language locale string from ctx (e.g. "zh-CN", "en-US").
 // Returns ("zh-CN", false) when the key is absent.
 func LanguageFromContext(ctx context.Context) (string, bool) {
