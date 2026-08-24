@@ -2,6 +2,7 @@
 
 > 状态机：`NOT_STARTED → IN_PROGRESS → CODED → VERIFIED → ACCEPTED`
 > 基线：`main @ 9b4f792a`（Gate 0 Baseline Fidelity，见 status/evidence/task001/）
+> Task002/003 implementation：`feature/evaluation-runtime-metering-freeze @ c089ab07`，annotated tag `gate/g1-g2a-implementation-20260825`
 >
 > Priority 语义：`P0-A` 是承重事实核心，`P0-B` 是必须在 Release 前关闭、但只能在具名前置输出稳定后启动的官方验收扩展；`P1/P2` 才是可延期能力。`P0-B` 不是降级，也不授权与 P0-A 无依赖地并行铺开。
 

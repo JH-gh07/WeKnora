@@ -7,6 +7,8 @@ status: ACTIVE
 created_at: 2026-08-25
 architecture_source: ../requirement_matrix.md
 external_delivery_blueprint: ../../../status/Imagination/最终理想项目的结构.md
+current_implementation_identity: c089ab07
+current_implementation_tag: gate/g1-g2a-implementation-20260825
 ```
 
 This registry records architecture decisions that affect more than one module, establish a long-lived fact boundary, or would be expensive to reverse. It is intentionally an index plus compact canonical decisions—not a requirement to create one file for every implementation detail.
