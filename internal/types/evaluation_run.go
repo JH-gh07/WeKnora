@@ -97,8 +97,8 @@ type EvaluationRun struct {
 	// Lifecycle.
 	Status             EvaluationRunStatus `json:"status" gorm:"column:status;type:varchar(16);index"`
 	InterruptionReason string              `json:"interruption_reason" gorm:"column:interruption_reason;type:varchar(32)"`
-	StartedAt          *time.Time         `json:"started_at" gorm:"column:started_at"`
-	EndedAt            *time.Time         `json:"ended_at" gorm:"column:ended_at"`
+	StartedAt          *time.Time          `json:"started_at" gorm:"column:started_at"`
+	EndedAt            *time.Time          `json:"ended_at" gorm:"column:ended_at"`
 
 	// Progress (best available; does not imply resumability).
 	TotalCount     int `json:"total_count" gorm:"column:total_count"`

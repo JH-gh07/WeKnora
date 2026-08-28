@@ -75,18 +75,18 @@ type evaluationProtocol struct {
 // summaryConfig mirrors the comparable (non-secret) summary parameters. Prompt
 // text is represented only by a digest.
 type summaryConfig struct {
-	MaxTokens            int         `json:"max_tokens"`
-	RepeatPenalty        float64     `json:"repeat_penalty"`
-	TopK                 int         `json:"top_k"`
-	TopP                 float64     `json:"top_p"`
-	FrequencyPenalty     float64     `json:"frequency_penalty"`
-	PresencePenalty      float64     `json:"presence_penalty"`
-	Temperature          float64     `json:"temperature"`
-	Seed                 int         `json:"seed"`
-	MaxCompletionTokens  int         `json:"max_completion_tokens"`
-	PromptDigest         promptDigest `json:"prompt_digest"`
+	MaxTokens             int          `json:"max_tokens"`
+	RepeatPenalty         float64      `json:"repeat_penalty"`
+	TopK                  int          `json:"top_k"`
+	TopP                  float64      `json:"top_p"`
+	FrequencyPenalty      float64      `json:"frequency_penalty"`
+	PresencePenalty       float64      `json:"presence_penalty"`
+	Temperature           float64      `json:"temperature"`
+	Seed                  int          `json:"seed"`
+	MaxCompletionTokens   int          `json:"max_completion_tokens"`
+	PromptDigest          promptDigest `json:"prompt_digest"`
 	ContextTemplateDigest promptDigest `json:"context_template_digest"`
-	NoMatchPrefixDigest  promptDigest `json:"no_match_prefix_digest"`
+	NoMatchPrefixDigest   promptDigest `json:"no_match_prefix_digest"`
 }
 
 // protocolSnapshotInput is the immutable set of facts used to build a protocol
@@ -108,32 +108,32 @@ type protocolSnapshotInput struct {
 func buildProtocolSnapshot(in protocolSnapshotInput) (types.JSON, string, error) {
 	p := &in.Params.PipelineRequest
 	proto := evaluationProtocol{
-		SchemaVersion:             evaluationProtocolSchemaVersion,
-		DatasetID:                 in.DatasetID,
-		DatasetContentHash:        in.DatasetContentHash,
-		EmbeddingModelID:          in.EmbeddingModelID,
-		ChatModelID:               in.ChatModelID,
-		RerankModelID:             in.RerankModelID,
-		SourceKnowledgeBaseID:     in.SourceKnowledgeBaseID,
-		VectorThreshold:           p.VectorThreshold,
-		KeywordThreshold:          p.KeywordThreshold,
-		EmbeddingTopK:             p.EmbeddingTopK,
-		MaxRounds:                 p.MaxRounds,
-		RerankTopK:                p.RerankTopK,
-		RerankThreshold:           p.RerankThreshold,
+		SchemaVersion:         evaluationProtocolSchemaVersion,
+		DatasetID:             in.DatasetID,
+		DatasetContentHash:    in.DatasetContentHash,
+		EmbeddingModelID:      in.EmbeddingModelID,
+		ChatModelID:           in.ChatModelID,
+		RerankModelID:         in.RerankModelID,
+		SourceKnowledgeBaseID: in.SourceKnowledgeBaseID,
+		VectorThreshold:       p.VectorThreshold,
+		KeywordThreshold:      p.KeywordThreshold,
+		EmbeddingTopK:         p.EmbeddingTopK,
+		MaxRounds:             p.MaxRounds,
+		RerankTopK:            p.RerankTopK,
+		RerankThreshold:       p.RerankThreshold,
 		Summary: summaryConfig{
-			MaxTokens:            p.SummaryConfig.MaxTokens,
-			RepeatPenalty:        p.SummaryConfig.RepeatPenalty,
-			TopK:                 p.SummaryConfig.TopK,
-			TopP:                 p.SummaryConfig.TopP,
-			FrequencyPenalty:     p.SummaryConfig.FrequencyPenalty,
-			PresencePenalty:      p.SummaryConfig.PresencePenalty,
-			Temperature:          p.SummaryConfig.Temperature,
-			Seed:                 p.SummaryConfig.Seed,
-			MaxCompletionTokens:  p.SummaryConfig.MaxCompletionTokens,
-			PromptDigest:         digestPrompt(p.SummaryConfig.Prompt),
+			MaxTokens:             p.SummaryConfig.MaxTokens,
+			RepeatPenalty:         p.SummaryConfig.RepeatPenalty,
+			TopK:                  p.SummaryConfig.TopK,
+			TopP:                  p.SummaryConfig.TopP,
+			FrequencyPenalty:      p.SummaryConfig.FrequencyPenalty,
+			PresencePenalty:       p.SummaryConfig.PresencePenalty,
+			Temperature:           p.SummaryConfig.Temperature,
+			Seed:                  p.SummaryConfig.Seed,
+			MaxCompletionTokens:   p.SummaryConfig.MaxCompletionTokens,
+			PromptDigest:          digestPrompt(p.SummaryConfig.Prompt),
 			ContextTemplateDigest: digestPrompt(p.SummaryConfig.ContextTemplate),
-			NoMatchPrefixDigest:  digestPrompt(p.SummaryConfig.NoMatchPrefix),
+			NoMatchPrefixDigest:   digestPrompt(p.SummaryConfig.NoMatchPrefix),
 		},
 		FallbackStrategy:          string(p.FallbackStrategy),
 		FallbackResponseDigest:    digestPrompt(p.FallbackResponse),
