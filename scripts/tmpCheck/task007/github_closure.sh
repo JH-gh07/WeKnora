@@ -54,6 +54,7 @@ has_authenticated_gh() {
 
 audit() {
   local repo_http rules_http workflow_http required=false workflow=false auth=false
+  local ruleset_details="$OUT_DIR/ruleset_details.json"
   repo_http="$(api_public '' "$OUT_DIR/repository.json")"
   rules_http="$(api_public 'rulesets?per_page=100' "$OUT_DIR/rulesets.json")"
   workflow_http="$(api_public 'actions/workflows/evaluation-regression.yml' "$OUT_DIR/workflow.json")"
@@ -66,6 +67,23 @@ audit() {
     return 4
   fi
 
+  # The collection endpoint returns Ruleset summaries without their `rules`
+  # arrays. Fetch every listed detail before evaluating the required context;
+  # inspecting `.rules` on rulesets.json would always produce a false negative.
+  printf '[]\n' > "$ruleset_details"
+  if [[ "$rules_http" == "200" ]]; then
+    local ruleset_id detail_http detail_file details_tmp
+    while IFS= read -r ruleset_id; do
+      [[ -n "$ruleset_id" ]] || continue
+      detail_file="$OUT_DIR/ruleset_${ruleset_id}.json"
+      detail_http="$(api_public "rulesets/$ruleset_id" "$detail_file")"
+      [[ "$detail_http" == "200" ]] || continue
+      details_tmp="$OUT_DIR/ruleset_details.tmp.json"
+      jq --slurpfile detail "$detail_file" '. + $detail' "$ruleset_details" > "$details_tmp"
+      mv "$details_tmp" "$ruleset_details"
+    done < <(jq -r '.[].id' "$OUT_DIR/rulesets.json")
+  fi
+
   if [[ "$rules_http" == "200" ]] && jq -e --arg check "$CHECK_NAME" '
       any(.[ ];
         .enforcement == "active" and
@@ -74,7 +92,7 @@ audit() {
           any(.parameters.required_status_checks[]?; .context == $check)
         )
       )
-    ' "$OUT_DIR/rulesets.json" >/dev/null; then
+    ' "$ruleset_details" >/dev/null; then
     required=true
   fi
 
