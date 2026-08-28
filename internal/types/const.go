@@ -81,8 +81,8 @@ const (
 	LLMPromptPrefixFingerprintContextKey ContextKey = "LLMPromptPrefixFingerprint"
 	// LLMRunIDContextKey and LLMTaskIDContextKey scope model calls to an
 	// evaluation run when one exists; ordinary calls intentionally leave them nil.
-	LLMRunIDContextKey ContextKey = "LLMRunID"
-	LLMTaskIDContextKey ContextKey = "LLMTaskID"
+	LLMRunIDContextKey   ContextKey = "LLMRunID"
+	LLMTaskIDContextKey  ContextKey = "LLMTaskID"
 	LLMTraceIDContextKey ContextKey = "LLMTraceID"
 	// MCPOAuthNonInteractiveContextKey marks a request whose channel cannot
 	// resolve an in-conversation MCP OAuth prompt (e.g. an IM bot: there is no
