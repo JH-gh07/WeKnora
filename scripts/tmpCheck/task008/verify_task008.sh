@@ -27,8 +27,8 @@ cd "$WKNORA_ROOT"
 # Deterministic locale: the verifier must not depend on the caller's terminal
 # locale. Evidence paths/content contain CJK; force a UTF-8 locale for the
 # shell and UTF-8 mode for Python (filesystem decoding of Chinese paths).
-export LC_ALL="${LC_ALL:-en_US.UTF-8}"
-export LANG="${LANG:-en_US.UTF-8}"
+export LC_ALL="en_US.UTF-8"
+export LANG="en_US.UTF-8"
 export PYTHONUTF8=1
 TS="$(date +%Y%m%d_%H%M%S)"
 RUN_DIR="/tmp/task008-verify/$TS"
@@ -63,6 +63,14 @@ skip() {
 
 
 m_preflight() {
+  # p0.06: run first so locale failures are surfaced before any other Python
+  # manifest/path check.
+  if python3 -c 'import os, tempfile, shutil; d = tempfile.mkdtemp(); p = os.path.join(d, "证据路径测试.txt"); open(p, "w", encoding="utf-8").write("ok"); assert "证据路径测试.txt" in os.listdir(d); shutil.rmtree(d); print("utf8_fs_ok")' > "$RUN_DIR/p0.06_locale.log" 2>&1; then
+    log p0.06_locale PASS "UTF-8 filesystem handling verified" 0 "$EVID/preflight.md"; PASS=$((PASS+1))
+  else
+    log p0.06_locale FAIL "python cannot handle CJK paths under forced locale" 0 "$EVID/preflight.md"; FAIL=$((FAIL+1))
+  fi
+
   # secret policy precedes every other evidence artifact (plan §2.2 last item)
   local sp; sp=$(stat -f %m "$EVID/secret_policy.md" 2>/dev/null || echo 0)
   local late=0
@@ -209,12 +217,6 @@ PYEOF
     log p0.05_output_manifest FAIL "output manifest drift" 0 "$EVID/evidence_output_manifest.tsv"; FAIL=$((FAIL+1))
   fi
 
-  # p0.06: locale probe — Python must handle CJK paths regardless of caller locale
-  if python3 -c 'import os, tempfile, shutil; d = tempfile.mkdtemp(); p = os.path.join(d, "证据路径测试.txt"); open(p, "w", encoding="utf-8").write("ok"); assert "证据路径测试.txt" in os.listdir(d); shutil.rmtree(d); print("utf8_fs_ok")' > "$RUN_DIR/p0.06_locale.log" 2>&1; then
-    log p0.06_locale PASS "UTF-8 filesystem handling verified" 0 "$EVID/preflight.md"; PASS=$((PASS+1))
-  else
-    log p0.06_locale FAIL "python cannot handle CJK paths under forced locale" 0 "$EVID/preflight.md"; FAIL=$((FAIL+1))
-  fi
 }
 
 m_reuse_audit() {
