@@ -56,6 +56,14 @@ func sortByScoreDesc(a, b *types.IndexWithScore) int {
 	} else if a.Score < b.Score {
 		return 1
 	}
+	// Deterministic tie-breaker (Task007/G5): on equal score, order by chunk ID
+	// ascending so the ranking is a total order and independent of the map
+	// iteration order upstream. This removes a real non-determinism source.
+	if a.ChunkID < b.ChunkID {
+		return -1
+	} else if a.ChunkID > b.ChunkID {
+		return 1
+	}
 	return 0
 }
 

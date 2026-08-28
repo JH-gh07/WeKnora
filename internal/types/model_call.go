@@ -85,13 +85,17 @@ type ModelCall struct {
 	ReportedModelRevision *string `json:"reported_model_revision,omitempty" gorm:"column:reported_model_revision;type:varchar(128)"`
 	DeploymentID          *string `json:"deployment_id,omitempty" gorm:"column:deployment_id;type:varchar(128)"`
 
-	InputTokens      *int              `json:"input_tokens,omitempty" gorm:"column:input_tokens"`
-	OutputTokens     *int              `json:"output_tokens,omitempty" gorm:"column:output_tokens"`
-	CacheReadTokens  *int              `json:"cache_read_tokens,omitempty" gorm:"column:cache_read_tokens"`
-	CacheWriteTokens *int              `json:"cache_write_tokens,omitempty" gorm:"column:cache_write_tokens"`
-	CacheMissTokens  *int              `json:"cache_miss_tokens,omitempty" gorm:"column:cache_miss_tokens"`
-	UsageFinality    UsageFinality     `json:"usage_finality" gorm:"column:usage_finality;type:varchar(24)"`
-	CacheStatus      PromptCacheStatus `json:"cache_status" gorm:"column:cache_status;type:varchar(24)"`
+	InputTokens      *int `json:"input_tokens,omitempty" gorm:"column:input_tokens"`
+	OutputTokens     *int `json:"output_tokens,omitempty" gorm:"column:output_tokens"`
+	CacheReadTokens  *int `json:"cache_read_tokens,omitempty" gorm:"column:cache_read_tokens"`
+	CacheWriteTokens *int `json:"cache_write_tokens,omitempty" gorm:"column:cache_write_tokens"`
+	CacheMissTokens  *int `json:"cache_miss_tokens,omitempty" gorm:"column:cache_miss_tokens"`
+	// CacheReportedInputTokens is the provider-reported input-token denominator
+	// for this call. It is populated only when prompt-cache telemetry is reported;
+	// callers must not reconstruct it from read/write/miss subsets.
+	CacheReportedInputTokens *int              `json:"cache_reported_input_tokens,omitempty" gorm:"column:cache_reported_input_tokens"`
+	UsageFinality            UsageFinality     `json:"usage_finality" gorm:"column:usage_finality;type:varchar(24)"`
+	CacheStatus              PromptCacheStatus `json:"cache_status" gorm:"column:cache_status;type:varchar(24)"`
 
 	ProviderLatencyMS    *int                 `json:"provider_latency_ms,omitempty" gorm:"column:provider_latency_ms"`
 	RequestElapsedMS     int                  `json:"request_elapsed_ms" gorm:"column:request_elapsed_ms"`
@@ -121,23 +125,31 @@ type ModelCallFilter struct {
 }
 
 type ModelUsageAggregate struct {
-	LogicalCallCount       int64                   `json:"logical_call_count"`
-	SuccessCount           int64                   `json:"success_count"`
-	FailureCount           int64                   `json:"failure_count"`
-	InputTokens            *int64                  `json:"input_tokens,omitempty"`
-	OutputTokens           *int64                  `json:"output_tokens,omitempty"`
-	CacheReadTokens        *int64                  `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens       *int64                  `json:"cache_write_tokens,omitempty"`
-	CacheMissTokens        *int64                  `json:"cache_miss_tokens,omitempty"`
-	KnownCostTotal         *float64                `json:"known_cost_total,omitempty"`
-	UnknownCostCallCount   int64                   `json:"unknown_cost_call_count"`
-	CacheEligibleCount     int64                   `json:"cache_eligible_count"`
-	CacheReportedCount     int64                   `json:"cache_reported_count"`
-	CacheUnsupportedCount  int64                   `json:"cache_unsupported_count"`
-	MeasurementStatus      MeasurementHealthStatus `json:"measurement_status"`
-	MeteringAttemptedCount int64                   `json:"metering_attempted_count"`
-	MeteringPersistedCount int64                   `json:"metering_persisted_count"`
-	MeteringFailedCount    int64                   `json:"metering_failed_count"`
+	LogicalCallCount         int64                   `json:"logical_call_count"`
+	SuccessCount             int64                   `json:"success_count"`
+	FailureCount             int64                   `json:"failure_count"`
+	InputTokens              *int64                  `json:"input_tokens,omitempty"`
+	OutputTokens             *int64                  `json:"output_tokens,omitempty"`
+	CacheReadTokens          *int64                  `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens         *int64                  `json:"cache_write_tokens,omitempty"`
+	CacheMissTokens          *int64                  `json:"cache_miss_tokens,omitempty"`
+	CacheReportedInputTokens *int64                  `json:"cache_reported_input_tokens,omitempty"`
+	KnownCostTotal           *float64                `json:"known_cost_total,omitempty"`
+	Currency                 *string                 `json:"currency,omitempty"`
+	MixedCurrency            bool                    `json:"mixed_currency"`
+	UnknownCostCallCount     int64                   `json:"unknown_cost_call_count"`
+	CacheEligibleCount       int64                   `json:"cache_eligible_count"`
+	CacheReportedCount       int64                   `json:"cache_reported_count"`
+	CacheUnsupportedCount    int64                   `json:"cache_unsupported_count"`
+	MeasurementStatus        MeasurementHealthStatus `json:"measurement_status"`
+	MeteringAttemptedCount   int64                   `json:"metering_attempted_count"`
+	MeteringPersistedCount   int64                   `json:"metering_persisted_count"`
+	MeteringFailedCount      int64                   `json:"metering_failed_count"`
+	// LocalEmbeddingCache is the additive local-cache fact. It is always
+	// present (never merged into the Prompt Cache fields above) and reports
+	// DISABLED when the capability is implemented but the rollout switch is
+	// off, so a zero hit count is never confused with "not implemented".
+	LocalEmbeddingCache *EmbeddingCacheAggregate `json:"local_embedding_cache"`
 }
 
 type MeasurementHealth struct {

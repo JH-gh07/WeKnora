@@ -1,0 +1,13 @@
+{
+  "schema_version": "regression_policy/1",
+  "policy_id": "quality-core-v1",
+  "numeric_epsilon": 1e-12,
+  "required_sample_count": 8,
+  "required_metric_coverage": 1.0,
+  "required_metrics": [
+    {"metric": "retrieval.mrr", "direction": "HIGHER_IS_BETTER", "max_absolute_regression": 0},
+    {"metric": "retrieval.ndcg@10", "direction": "HIGHER_IS_BETTER", "max_absolute_regression": 0},
+    {"metric": "retrieval.ndcg@3", "direction": "HIGHER_IS_BETTER", "max_absolute_regression": 0},
+    {"metric": "retrieval.recall", "direction": "HIGHER_IS_BETTER", "max_absolute_regression": 0}
+  ]
+}

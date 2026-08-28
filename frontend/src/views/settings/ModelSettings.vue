@@ -114,6 +114,10 @@
                   <t-icon name="image" size="12px" />
                 </span>
               </template>
+              <template v-if="model._modelType === 'vllm' || model._modelType === 'asr'">
+                <span class="model-card__sep">·</span>
+                <span class="model-card__metering-tag">{{ $t('modelUsage.meteringNotImplemented') }}</span>
+              </template>
             </p>
           </div>
         </div>
@@ -132,6 +136,8 @@
       </div>
     </t-loading>
 
+    <ModelUsagePanel :models="meteredModels" />
+
     <!-- 模型编辑器抽屉 -->
     <ModelEditorDialog v-model:visible="showDialog" :model-type="currentModelType" :model-data="editingModel"
       @confirm="handleModelSave" />
@@ -147,6 +153,7 @@ import { AddIcon, PlayCircleIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
 import ModelEditorDialog from '@/components/ModelEditorDialog.vue'
 import ModelDebugDrawer from '@/components/ModelDebugDrawer.vue'
+import ModelUsagePanel from './components/ModelUsagePanel.vue'
 import { listModels, createModel, updateModel as updateModelAPI, deleteModel as deleteModelAPI, type ModelConfig } from '@/api/model'
 import { useAuthStore } from '@/stores/auth'
 import { useUIStore } from '@/stores/ui'
@@ -294,6 +301,19 @@ const modelDisplayName = (model: any) => {
   const displayName = typeof model.displayName === 'string' ? model.displayName.trim() : ''
   return displayName || model.name
 }
+
+// Usage 面板仅计量 chat/embedding/rerank 三类（vllm/asr 未接入计量，卡片上另有 NOT_IMPLEMENTED 提示）。
+const METERED_TYPES = ['chat', 'embedding', 'rerank'] as const
+const meteredModels = computed(() =>
+  allLegacyModels.value
+    .filter(m => (METERED_TYPES as readonly string[]).includes(m._modelType))
+    .map(m => ({
+      id: String(m.id),
+      name: m.name,
+      displayName: modelDisplayName(m),
+      type: m._modelType as 'chat' | 'embedding' | 'rerank',
+    })),
+)
 
 const emptyHint = computed(() => {
   if (activeTypeFilter.value === 'all') return t('modelSettings.chat.empty')
@@ -943,6 +963,11 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 3px;
+}
+
+.model-card__metering-tag {
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
 }
 
 .model-card__actions {

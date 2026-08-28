@@ -6358,5 +6358,49 @@ export default {
     myChats: '我的对话',
     apiChats: 'API 会话',
     noSessions: '暂无对话'
+  },
+  modelUsage: {
+    title: '模型用量',
+    description: '当前空间与 UTC 时间窗口内的只读用量',
+    modelLabel: '模型',
+    allMetered: '全部已计量模型',
+    timePreset: '时间范围',
+    windowLabel: 'UTC 范围',
+    measurementBoundary: '计量完整性覆盖当前空间与时间窗口，而非单个模型。',
+    logicalCalls: '逻辑调用',
+    success: '成功',
+    failure: '失败',
+    promptCacheCoverage: 'Prompt Cache 上报覆盖率',
+    cachedTokenRatio: '缓存 token 占比',
+    localEmbeddingCache: '本地 Embedding 缓存',
+    localLookupFailed: '{count} 次缓存查询失败',
+    localCorruption: '{count} 条损坏条目已拒绝',
+    localWriteFailed: '{count} 次缓存写入失败',
+    knownCost: '已知估算费用',
+    unknownPriceCalls: '{count} 次调用价格未知',
+    costDisclaimer: '基于历史定价的估算值，非账单总额。',
+    contractAnomaly: '检测到契约异常——受影响数值已显示为“无法判断”',
+    measurementHealth: '计量完整性',
+    attempted: '已尝试',
+    persisted: '已持久化',
+    failed: '失败',
+    loading: '加载用量…',
+    empty: '该窗口内无逻辑调用',
+    error: '加载用量失败',
+    retry: '重试',
+    meteringNotImplemented: '尚未计量',
+    availability: {
+      available: '可用',
+      notImplemented: '尚未实现',
+      unsupported: 'Provider 不支持',
+      unreported: 'Provider 未上报',
+      unknown: '无法判断',
+      disabled: '已禁用'
+    },
+    health: {
+      complete: '空间窗口计量完整',
+      partial: '空间窗口计量不完整',
+      unknown: '空间窗口计量未知'
+    }
   }
 }

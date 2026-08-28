@@ -167,13 +167,15 @@ func (r *modelCallRepository) AggregateModelCalls(ctx context.Context, filter ty
 		q = q.Where("created_at < ?", *filter.To)
 	}
 	var row struct {
-		LogicalCallCount                                                              int64
-		SuccessCount                                                                  int64
-		FailureCount                                                                  int64
-		InputTokens, OutputTokens, CacheReadTokens, CacheWriteTokens, CacheMissTokens sql.NullInt64
-		KnownCostTotal                                                                sql.NullFloat64
-		UnknownCostCallCount                                                          int64
-		CacheEligibleCount, CacheReportedCount, CacheUnsupportedCount                 int64
+		LogicalCallCount                                                                                        int64
+		SuccessCount                                                                                            int64
+		FailureCount                                                                                            int64
+		InputTokens, OutputTokens, CacheReadTokens, CacheWriteTokens, CacheMissTokens, CacheReportedInputTokens sql.NullInt64
+		KnownCostTotal                                                                                          sql.NullFloat64
+		Currency                                                                                                sql.NullString
+		KnownCostCurrencyCount, KnownCostMissingCurrencyCount                                                   int64
+		UnknownCostCallCount                                                                                    int64
+		CacheEligibleCount, CacheReportedCount, CacheUnsupportedCount                                           int64
 	}
 	// SUM remains NULL when every value is unknown. This is deliberate: the
 	// caller can distinguish unknown telemetry from an observed zero.
@@ -183,7 +185,11 @@ func (r *modelCallRepository) AggregateModelCalls(ctx context.Context, filter ty
 		SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens,
 		SUM(cache_read_tokens) AS cache_read_tokens, SUM(cache_write_tokens) AS cache_write_tokens,
 		SUM(cache_miss_tokens) AS cache_miss_tokens,
+		SUM(cache_reported_input_tokens) AS cache_reported_input_tokens,
 		SUM(estimated_cost) AS known_cost_total,
+		MIN(CASE WHEN estimated_cost IS NOT NULL AND currency <> '' THEN currency END) AS currency,
+		COUNT(DISTINCT CASE WHEN estimated_cost IS NOT NULL AND currency <> '' THEN currency END) AS known_cost_currency_count,
+		SUM(CASE WHEN estimated_cost IS NOT NULL AND currency = '' THEN 1 ELSE 0 END) AS known_cost_missing_currency_count,
 		SUM(CASE WHEN estimated_cost IS NULL THEN 1 ELSE 0 END) AS unknown_cost_call_count,
 		SUM(CASE WHEN cache_status <> 'unsupported' THEN 1 ELSE 0 END) AS cache_eligible_count,
 		SUM(CASE WHEN cache_status IN ('hit','miss') THEN 1 ELSE 0 END) AS cache_reported_count,
@@ -202,9 +208,16 @@ func (r *modelCallRepository) AggregateModelCalls(ctx context.Context, filter ty
 	}
 	out.InputTokens, out.OutputTokens, out.CacheReadTokens = assignInt(row.InputTokens), assignInt(row.OutputTokens), assignInt(row.CacheReadTokens)
 	out.CacheWriteTokens, out.CacheMissTokens = assignInt(row.CacheWriteTokens), assignInt(row.CacheMissTokens)
-	if row.KnownCostTotal.Valid {
+	out.CacheReportedInputTokens = assignInt(row.CacheReportedInputTokens)
+	// A subtotal is only a usable fact when every priced row has the same,
+	// non-empty historical currency identity. Mixed or unidentified currencies
+	// fail closed instead of returning a dimensionless/mixed sum.
+	out.MixedCurrency = row.KnownCostCurrencyCount > 1
+	if row.KnownCostTotal.Valid && row.KnownCostCurrencyCount == 1 && row.KnownCostMissingCurrencyCount == 0 && row.Currency.Valid {
 		x := row.KnownCostTotal.Float64
 		out.KnownCostTotal = &x
+		currency := row.Currency.String
+		out.Currency = &currency
 	}
 	health, err := r.GetMeasurementHealth(ctx, filter.TenantID, valueOrMin(filter.From), valueOrMax(filter.To))
 	if err != nil {

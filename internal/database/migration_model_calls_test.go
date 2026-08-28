@@ -37,9 +37,9 @@ func TestSQLiteMigrationsCreateModelCallsWithNullableUnknowns(t *testing.T) {
 	}
 }
 
-// TestSQLiteMigrationsModelCallsRepeatAndDown proves the model_calls migration is
-// idempotent (repeat up is a no-op) and reversible (down drops both tables, up
-// recreates them), rather than only exercising a fresh up.
+// TestSQLiteMigrationsModelCallsRepeatAndDown proves the latest additive
+// model-call migration is idempotent and reversible without dropping the
+// existing model_calls facts.
 func TestSQLiteMigrationsModelCallsRepeatAndDown(t *testing.T) {
 	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
 	require.NoError(t, err)
@@ -55,29 +55,51 @@ func TestSQLiteMigrationsModelCallsRepeatAndDown(t *testing.T) {
 	latest, dirty, err := m.Version()
 	require.NoError(t, err)
 	require.False(t, dirty)
-	require.Equal(t, uint(6), latest, "SQLite migration set must still top out at version 6")
+	require.Equal(t, uint(8), latest, "SQLite migration set must include the reported-input denominator migration")
 
 	// Repeat up is a no-op, not an error.
 	require.ErrorIs(t, m.Up(), migrate.ErrNoChange)
 
-	// Down drops model_calls + model_metering_health. Use Steps(-1): Down()
-	// migrates all the way to the nil version, not a single step.
-	require.NoError(t, m.Steps(-1))
+	// Two steps down: drop the embedding-cache migration (000008), then the
+	// additive denominator column (000007). The model_calls facts survive.
+	require.NoError(t, m.Steps(-2))
 	downVersion, dirty, err := m.Version()
 	require.NoError(t, err)
 	require.False(t, dirty)
-	require.Equal(t, latest-1, downVersion)
-	require.False(t, sqliteTableExists(t, dbPath, "model_calls"), "down must drop model_calls")
-	require.False(t, sqliteTableExists(t, dbPath, "model_metering_health"), "down must drop model_metering_health")
+	require.Equal(t, latest-2, downVersion)
+	require.True(t, sqliteTableExists(t, dbPath, "model_calls"), "down must preserve model_calls")
+	require.False(t, sqliteColumnExists(t, dbPath, "model_calls", "cache_reported_input_tokens"), "down must remove only the additive column")
 
-	// Up again recreates both tables.
+	// Up again restores the denominator column.
 	require.NoError(t, m.Up())
 	upVersion, dirty, err := m.Version()
 	require.NoError(t, err)
 	require.False(t, dirty)
 	require.Equal(t, latest, upVersion)
 	require.True(t, sqliteTableExists(t, dbPath, "model_calls"), "up must recreate model_calls")
-	require.True(t, sqliteTableExists(t, dbPath, "model_metering_health"), "up must recreate model_metering_health")
+	require.True(t, sqliteColumnExists(t, dbPath, "model_calls", "cache_reported_input_tokens"), "up must restore additive column")
+}
+
+func sqliteColumnExists(t *testing.T, dbPath, table, column string) bool {
+	t.Helper()
+	db, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
+	require.NoError(t, err)
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var cid int
+		var name, dataType string
+		var notNull, primaryKey int
+		var defaultValue any
+		require.NoError(t, rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey))
+		if name == column {
+			return true
+		}
+	}
+	require.NoError(t, rows.Err())
+	return false
 }
 
 func newSQLiteMigrator(t *testing.T, dbPath string) *migrate.Migrate {
