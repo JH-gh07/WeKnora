@@ -71,7 +71,7 @@ cache_key = SHA-256(
 ## Acceptance evidence (2026-08-26)
 
 - Step 8 dual-DB parity: PostgreSQL (ephemeral paradedb container, full 89-migration
-  `migrate up` incl. `000088_embedding_cache`) and SQLite both pass
+  `migrate up` incl. `000093_embedding_cache`) and SQLite both pass
   `embedding_cache_entries`/`embedding_cache_observations` create/unique/repeat/down,
   tenant isolation, restart warm hit, and the OFF/Cold/Warm experiment with identical
   `vector_batch_digest` values. See `status/evidence/task005/migration_postgres.log`,

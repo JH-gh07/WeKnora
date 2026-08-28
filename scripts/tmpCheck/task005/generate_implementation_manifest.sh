@@ -32,10 +32,10 @@ FILES=(
   internal/models/embedding/cache_test.go
   internal/types/embedding_cache.go
   internal/types/interfaces/embedding_cache.go
-  migrations/sqlite/000008_embedding_cache.down.sql
-  migrations/sqlite/000008_embedding_cache.up.sql
-  migrations/versioned/000088_embedding_cache.down.sql
-  migrations/versioned/000088_embedding_cache.up.sql
+  migrations/sqlite/000016_embedding_cache.down.sql
+  migrations/sqlite/000016_embedding_cache.up.sql
+  migrations/versioned/000093_embedding_cache.down.sql
+  migrations/versioned/000093_embedding_cache.up.sql
 )
 
 while IFS= read -r path; do

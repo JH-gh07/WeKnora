@@ -26,11 +26,16 @@ type tenantService struct {
 	embeddingCache interfaces.EmbeddingCacheRepository
 }
 
-// NewTenantService creates a new tenant service instance. The embedding cache
-// repository is optional (nil) so tenants created in a context without the cache
-// capability still delete cleanly; when present, DeleteTenant purges the
-// tenant's local embedding cache rows before the tenant itself is deleted.
-func NewTenantService(repo interfaces.TenantRepository, storageRepo interfaces.StorageBackendRepository, embeddingCache interfaces.EmbeddingCacheRepository) interfaces.TenantService {
+// NewTenantService preserves the pre-cache constructor for callers that do
+// not assemble the full production dependency graph.
+func NewTenantService(repo interfaces.TenantRepository, storageRepo interfaces.StorageBackendRepository) interfaces.TenantService {
+	return NewTenantServiceWithEmbeddingCache(repo, storageRepo, nil)
+}
+
+// NewTenantServiceWithEmbeddingCache creates the production tenant service.
+// When the repository is present, DeleteTenant purges tenant-owned embedding
+// cache rows before deleting the tenant control fact.
+func NewTenantServiceWithEmbeddingCache(repo interfaces.TenantRepository, storageRepo interfaces.StorageBackendRepository, embeddingCache interfaces.EmbeddingCacheRepository) interfaces.TenantService {
 	return &tenantService{repo: repo, storageRepo: storageRepo, embeddingCache: embeddingCache}
 }
 

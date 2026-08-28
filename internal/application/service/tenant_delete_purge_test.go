@@ -73,7 +73,7 @@ func newTenantSvc(t *testing.T, db *gorm.DB, cache interfaces.EmbeddingCacheRepo
 	t.Helper()
 	tenantRepo := repository.NewTenantRepository(db)
 	storageRepo := repository.NewStorageBackendRepository(db)
-	return service.NewTenantService(tenantRepo, storageRepo, cache), tenantRepo
+	return service.NewTenantServiceWithEmbeddingCache(tenantRepo, storageRepo, cache), tenantRepo
 }
 
 func createTenant(t *testing.T, svc interfaces.TenantService, name string) *types.Tenant {
@@ -166,7 +166,7 @@ func TestDeleteTenantRepoDeleteFailurePropagates(t *testing.T) {
 	realRepo := repository.NewTenantRepository(db)
 	repo := &failingTenantRepo{TenantRepository: realRepo, err: errors.New("tenant delete down")}
 	storageRepo := repository.NewStorageBackendRepository(db)
-	svc := service.NewTenantService(repo, storageRepo, cache)
+	svc := service.NewTenantServiceWithEmbeddingCache(repo, storageRepo, cache)
 
 	tenant := createTenant(t, svc, "workspace-a")
 	insertCacheRows(t, db, tenant.ID)

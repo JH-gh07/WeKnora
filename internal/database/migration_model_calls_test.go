@@ -55,20 +55,20 @@ func TestSQLiteMigrationsModelCallsRepeatAndDown(t *testing.T) {
 	latest, dirty, err := m.Version()
 	require.NoError(t, err)
 	require.False(t, dirty)
-	require.Equal(t, uint(8), latest, "SQLite migration set must include the reported-input denominator migration")
+	require.Equal(t, uint(16), latest, "SQLite migration set must include the reported-input denominator migration")
 
 	// Repeat up is a no-op, not an error.
 	require.ErrorIs(t, m.Up(), migrate.ErrNoChange)
 
-	// Two steps down: drop the embedding-cache migration (000008), then the
-	// additive denominator column (000007). The model_calls facts survive.
+	// Two steps down: drop the embedding-cache migration (000016), then the
+	// additive denominator column (000015). The model_calls facts survive.
 	require.NoError(t, m.Steps(-2))
 	downVersion, dirty, err := m.Version()
 	require.NoError(t, err)
 	require.False(t, dirty)
 	require.Equal(t, latest-2, downVersion)
-	require.True(t, sqliteTableExists(t, dbPath, "model_calls"), "down must preserve model_calls")
-	require.False(t, sqliteColumnExists(t, dbPath, "model_calls", "cache_reported_input_tokens"), "down must remove only the additive column")
+	require.True(t, taskSQLiteTableExists(t, dbPath, "model_calls"), "down must preserve model_calls")
+	require.False(t, taskSQLiteColumnExists(t, dbPath, "model_calls", "cache_reported_input_tokens"), "down must remove only the additive column")
 
 	// Up again restores the denominator column.
 	require.NoError(t, m.Up())
@@ -76,11 +76,11 @@ func TestSQLiteMigrationsModelCallsRepeatAndDown(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, dirty)
 	require.Equal(t, latest, upVersion)
-	require.True(t, sqliteTableExists(t, dbPath, "model_calls"), "up must recreate model_calls")
-	require.True(t, sqliteColumnExists(t, dbPath, "model_calls", "cache_reported_input_tokens"), "up must restore additive column")
+	require.True(t, taskSQLiteTableExists(t, dbPath, "model_calls"), "up must recreate model_calls")
+	require.True(t, taskSQLiteColumnExists(t, dbPath, "model_calls", "cache_reported_input_tokens"), "up must restore additive column")
 }
 
-func sqliteColumnExists(t *testing.T, dbPath, table, column string) bool {
+func taskSQLiteColumnExists(t *testing.T, dbPath, table, column string) bool {
 	t.Helper()
 	db, err := sql.Open("sqlite3", dbPath)
 	require.NoError(t, err)
@@ -114,7 +114,7 @@ func newSQLiteMigrator(t *testing.T, dbPath string) *migrate.Migrate {
 	return m
 }
 
-func sqliteTableExists(t *testing.T, dbPath, table string) bool {
+func taskSQLiteTableExists(t *testing.T, dbPath, table string) bool {
 	t.Helper()
 	db, err := sql.Open("sqlite3", dbPath)
 	require.NoError(t, err)

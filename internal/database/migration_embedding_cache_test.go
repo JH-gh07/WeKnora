@@ -71,17 +71,17 @@ func TestSQLiteMigrationsEmbeddingCacheRepeatAndDown(t *testing.T) {
 	latest, dirty, err := m.Version()
 	require.NoError(t, err)
 	require.False(t, dirty)
-	require.Equal(t, uint(8), latest, "SQLite migration set must include the embedding cache migration")
+	require.Equal(t, uint(16), latest, "SQLite migration set must include the embedding cache migration")
 
 	require.ErrorIs(t, m.Up(), migrate.ErrNoChange)
 
 	// One step down removes the cache tables.
 	require.NoError(t, m.Steps(-1))
-	require.True(t, sqliteTableExists(t, dbPath, "model_calls"), "down must preserve model_calls")
-	require.False(t, sqliteTableExists(t, dbPath, "embedding_cache_entries"), "down must drop entries")
-	require.False(t, sqliteTableExists(t, dbPath, "embedding_cache_observations"), "down must drop observations")
+	require.True(t, taskSQLiteTableExists(t, dbPath, "model_calls"), "down must preserve model_calls")
+	require.False(t, taskSQLiteTableExists(t, dbPath, "embedding_cache_entries"), "down must drop entries")
+	require.False(t, taskSQLiteTableExists(t, dbPath, "embedding_cache_observations"), "down must drop observations")
 
 	require.NoError(t, m.Up())
-	require.True(t, sqliteTableExists(t, dbPath, "embedding_cache_entries"), "up must recreate entries")
-	require.True(t, sqliteTableExists(t, dbPath, "embedding_cache_observations"), "up must recreate observations")
+	require.True(t, taskSQLiteTableExists(t, dbPath, "embedding_cache_entries"), "up must recreate entries")
+	require.True(t, taskSQLiteTableExists(t, dbPath, "embedding_cache_observations"), "up must recreate observations")
 }

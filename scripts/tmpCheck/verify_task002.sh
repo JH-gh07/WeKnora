@@ -273,10 +273,10 @@ run_postgres() {
   record "postgres-container" PASS "isolated PostgreSQL ready"
 
   if docker exec -i "$PG_CONTAINER" psql -v ON_ERROR_STOP=1 -U task002 -d task002 \
-      < "$REPO_ROOT/migrations/versioned/000085_evaluation_runs.up.sql" \
+      < "$REPO_ROOT/migrations/versioned/000090_evaluation_runs.up.sql" \
       >"$REPORT_DIR/postgres-migration.log" 2>&1 && \
      docker exec -i "$PG_CONTAINER" psql -v ON_ERROR_STOP=1 -U task002 -d task002 \
-      < "$REPO_ROOT/migrations/versioned/000085_evaluation_runs.up.sql" \
+      < "$REPO_ROOT/migrations/versioned/000090_evaluation_runs.up.sql" \
       >>"$REPORT_DIR/postgres-migration.log" 2>&1; then
     record "postgres-up-idempotent" PASS "fresh apply and repeat apply succeeded"
   else
@@ -294,7 +294,7 @@ run_postgres() {
   fi
 
   if docker exec -i "$PG_CONTAINER" psql -v ON_ERROR_STOP=1 -U task002 -d task002 \
-      < "$REPO_ROOT/migrations/versioned/000085_evaluation_runs.down.sql" \
+      < "$REPO_ROOT/migrations/versioned/000090_evaluation_runs.down.sql" \
       >"$REPORT_DIR/postgres-down.log" 2>&1; then
     record "postgres-down" PASS "down migration succeeded"
   else
