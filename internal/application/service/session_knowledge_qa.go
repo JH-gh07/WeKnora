@@ -25,6 +25,10 @@ func (s *sessionService) KnowledgeQA(
 	req *types.QARequest,
 	eventBus *event.EventBus,
 ) error {
+	// Attribute every model call in the normal QA pipeline (query embedding,
+	// rerank, chat completion) to the knowledge_qa purpose. Inner stages may
+	// override with a more specific purpose (e.g. query_rewrite).
+	ctx = types.WithLLMCallMetadata(ctx, "knowledge_qa", "")
 	logger.Infof(
 		ctx,
 		"Knowledge base question answering parameters, session ID: %s, query: %s, webSearchEnabled: %v",

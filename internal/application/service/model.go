@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/asr"
@@ -31,6 +32,52 @@ type modelService struct {
 	ollamaService *ollama.OllamaService
 	pooler        embedding.EmbedderPooler
 	tenantService interfaces.TenantService
+	callRecorder  types.ModelCallRecorder
+
+	embeddingCache        interfaces.EmbeddingCacheRepository
+	embeddingCacheEnabled bool
+}
+
+// NewMeteredModelService is the production constructor. The unmetered
+// constructor remains available to narrow unit tests and explicit model
+// connection checks that must not be counted as business usage.
+func NewMeteredModelService(repo interfaces.ModelRepository,
+	kbRepo interfaces.KnowledgeBaseRepository,
+	agentRepo interfaces.CustomAgentRepository,
+	ollamaService *ollama.OllamaService,
+	pooler embedding.EmbedderPooler,
+	tenantService interfaces.TenantService,
+	callRecorder interfaces.ModelCallRepository,
+	embeddingCache interfaces.EmbeddingCacheRepository,
+	cfg *config.Config,
+) interfaces.ModelService {
+	svc := NewModelService(repo, kbRepo, agentRepo, ollamaService, pooler, tenantService).(*modelService)
+	svc.callRecorder = callRecorder
+	svc.embeddingCache = embeddingCache
+	svc.embeddingCacheEnabled = cfg != nil && cfg.EmbeddingCache != nil && cfg.EmbeddingCache.Enabled
+	return svc
+}
+
+func (s *modelService) embeddingConfig(model *types.Model, appID, appSecret string) embedding.Config {
+	cfg := embedding.ConfigFromModel(model, appID, appSecret)
+	cfg.Recorder = s.callRecorder
+	return cfg
+}
+
+func (s *modelService) chatConfig(model *types.Model, appID, appSecret string) *chat.ChatConfig {
+	cfg := chat.ConfigFromModel(model, appID, appSecret)
+	if cfg != nil {
+		cfg.Recorder = s.callRecorder
+	}
+	return cfg
+}
+
+func (s *modelService) rerankerConfig(model *types.Model, appID, appSecret string) *rerank.RerankerConfig {
+	cfg := rerank.ConfigFromModel(model, appID, appSecret)
+	if cfg != nil {
+		cfg.Recorder = s.callRecorder
+	}
+	return cfg
 }
 
 // NewModelService creates a new model service instance
@@ -425,6 +472,15 @@ func (s *modelService) DeleteModel(ctx context.Context, id string) error {
 		return err
 	}
 
+	// Purge any local embedding cache facts for the deleted model. This is
+	// best-effort lifecycle cleanup: a purge failure never blocks the delete,
+	// and the cache identity already guarantees old entries can no longer hit.
+	if s.embeddingCache != nil {
+		if purgeErr := s.embeddingCache.DeleteByModel(ctx, tenantID, id); purgeErr != nil {
+			logger.Errorf(ctx, "embedding cache purge after model delete failed: %v", purgeErr)
+		}
+	}
+
 	logger.Infof(ctx, "Model deleted successfully: %s", id)
 	return nil
 }
@@ -445,7 +501,8 @@ func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (e
 
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
-	embedder, err := embedding.NewEmbedder(embedding.ConfigFromModel(model, appID, appSecret), s.pooler, s.ollamaService)
+	cfg := s.embeddingConfig(model, appID, appSecret)
+	embedder, err := embedding.NewEmbedder(cfg, s.pooler, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -453,6 +510,9 @@ func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (e
 		})
 		return nil, err
 	}
+
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	embedder = s.wrapEmbeddingCache(embedder, cfg, tenantID)
 
 	logger.Info(ctx, "Embedding model initialized successfully")
 	return embedder, nil
@@ -492,7 +552,8 @@ func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId s
 
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
-	embedder, err := embedding.NewEmbedder(embedding.ConfigFromModel(model, appID, appSecret), s.pooler, s.ollamaService)
+	cfg := s.embeddingConfig(model, appID, appSecret)
+	embedder, err := embedding.NewEmbedder(cfg, s.pooler, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -502,8 +563,26 @@ func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId s
 		return nil, err
 	}
 
+	embedder = s.wrapEmbeddingCache(embedder, cfg, tenantID)
+
 	logger.Info(ctx, "Cross-tenant embedding model initialized successfully")
 	return embedder, nil
+}
+
+// wrapEmbeddingCache installs the tenant-scoped local embedding cache as the
+// outermost decorator when the rollout switch is enabled. It is a no-op when
+// disabled, so the original metered provider path is preserved.
+func (s *modelService) wrapEmbeddingCache(e embedding.Embedder, cfg embedding.Config, tenantID uint64) embedding.Embedder {
+	if !s.embeddingCacheEnabled || s.embeddingCache == nil || e == nil {
+		return e
+	}
+	return embedding.WrapEmbeddingCache(e, embedding.CacheOptions{
+		Enabled:  true,
+		TenantID: tenantID,
+		Store:    s.embeddingCache,
+		Observer: s.embeddingCache,
+		Config:   cfg,
+	})
 }
 
 // GetRerankModel retrieves and initializes a reranking model instance
@@ -522,7 +601,7 @@ func (s *modelService) GetRerankModel(ctx context.Context, modelId string) (rera
 
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
-	reranker, err := rerank.NewReranker(rerank.ConfigFromModel(model, appID, appSecret))
+	reranker, err := rerank.NewReranker(s.rerankerConfig(model, appID, appSecret))
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -565,7 +644,7 @@ func (s *modelService) GetChatModel(ctx context.Context, modelId string) (chat.C
 
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
-	chatModel, err := chat.NewChat(chat.ConfigFromModel(model, appID, appSecret), s.ollamaService)
+	chatModel, err := chat.NewChat(s.chatConfig(model, appID, appSecret), s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,

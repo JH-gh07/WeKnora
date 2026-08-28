@@ -1,0 +1,260 @@
+# Task007 (G5) — Deterministic Quality Regression Gate.
+#
+# This is the dedicated required check for R4 (Quality Regression CI). It runs
+# the offline deterministic retrieval runner and the trusted comparator with no
+# external Provider dependency and no secrets (the runner performs no network
+# I/O, and the SUT seam is statically forbidden from network/provider/db/
+# subprocess/file-write/init content by the boundary audit below and by the
+# trusted runner's ValidateRankingSeamSource; this does not claim general
+# network egress isolation of the runner host). It intentionally has NO `paths`
+# filter so the fixed check name can never be silently absent from a PR (the
+# base.yml/app.yml pattern filters paths and is therefore NOT usable here).
+#
+# Trigger: pull_request ONLY. There is deliberately NO workflow_dispatch:
+# a manually triggered run has no trustworthy PR base/head pair to derive the
+# trusted control plane from, so dispatch would be an unverifiable path.
+#
+# Trust boundary (P0-1): the evaluator identity is VERIFIED, not self-reported.
+#   - trusted  = checkout of github.event.pull_request.base.sha: the evaluator
+#                (runner + metric implementations), the comparator control plane,
+#                and the fixture/policy/contract/manifest/baseline.
+#   - candidate = checkout of the evaluated PR SHA: ONLY the production ranking
+#                seam (knowledgebase_search_fusion.go) is taken from it — this is
+#                the SUT whose change is under test.
+# Both checkouts set persist-credentials: false so no credential material is
+# ever written into either working tree.
+#
+# Changed-file classification (fail closed): the gate only has measurement
+# coverage for ONE file — the ranking seam. So before anything runs:
+#   - measurement apparatus changed (cmd/evaluation-regression, evaluator,
+#     metric definitions, fixtures/policies/baselines/contract, this workflow,
+#     verify script) -> NOT_COMPARABLE (NOT_COMPARABLE_EVALUATOR): requires
+#     Measurement Change Review; the gate cannot referee its own referee.
+#   - any OTHER retrieval-affecting file changed (knowledgebase/knowledge/
+#     chat_pipeline/retriever/vectorstore/web_search/session QA/retrieval
+#     types/config) -> NOT_COMPARABLE (NOT_COMPARABLE_RANKING_CONTRACT): outside
+#     the frozen SUT manifest; requires Measurement Change Review or an explicit
+#     SUT-manifest extension.
+#   - only unrelated files (or exactly the SUT seam) -> the gate runs.
+#
+# The runner binary is built from the TRUSTED evaluator with the candidate's
+# ranking seam overlaid on top. `run` then RE-COMPUTES the evaluator artifact
+# hash from the on-disk component files and requires it to equal the frozen
+# contract hash, so a PR cannot tamper with the measurement apparatus. The
+# ranking seam's own identity is recorded as ranking_artifact_hash and is
+# ALLOWED to differ across candidates (that is the point of the gate); the
+# comparator blocks only on metric regression.
+#
+# Decision -> exit: PASS=0, BLOCK=2, NOT_COMPARABLE=3, ERROR=4. exit 1 is
+# reserved for flag/usage errors and is treated as an infrastructure failure.
+
+name: Evaluation Quality Regression
+
+on:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.26"
+  GOPROXY: https://proxy.golang.org,direct
+  LOG_FORMAT: ""
+
+jobs:
+  quality:
+    # This exact, globally distinctive context is the frozen Ruleset contract.
+    # Do not shorten it to `quality`: generic contexts can collide with another
+    # workflow/App and accidentally satisfy the required check.
+    name: evaluation-regression / quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # --- trusted control plane (BASE SHA) -------------------------------
+      # No fallback refs: the trusted base is ALWAYS the PR base SHA.
+      - name: Checkout trusted base
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted
+          fetch-depth: 1
+          persist-credentials: false
+
+      # --- candidate (evaluated PR SHA) -----------------------------------
+      # fetch-depth: 0 so the base..head diff can be computed locally for
+      # changed-file classification (no unauthenticated API calls needed).
+      - name: Checkout candidate
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+
+      # --- changed-file classification (fail closed) ----------------------
+      - name: Classify changed files
+        id: classify
+        working-directory: candidate
+        run: |
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          if ! git diff --no-renames --name-status -z "$BASE_SHA" "$HEAD_SHA" > ../changed_files.z 2> ../changed_files.err; then
+            echo "classification error: cannot diff base..head; failing closed" >&2
+            cat ../changed_files.err >&2
+            exit 1
+          fi
+          TRUSTED_CLASSIFIER=../trusted/scripts/tmpCheck/task007/classify_changed_files.sh
+          if [ ! -x "$TRUSTED_CLASSIFIER" ]; then
+            # BOOTSTRAP_TRUSTED_CLASSIFIER_ABSENT: the first PR introducing the
+            # gate cannot trust the candidate's classifier. Treat the whole PR
+            # as a measurement-apparatus change and require explicit review.
+            # This is NOT a bypass: it deterministically fails closed as
+            # NOT_COMPARABLE_EVALUATOR in the next step.
+            printf 'protected=1\nretrieval=0\n' > ../classification.env
+            echo "bootstrap: trusted classifier absent on base; measurement change review required" \
+              > ../changed_files.txt
+          elif ! "$TRUSTED_CLASSIFIER" \
+              < ../changed_files.z > ../classification.env 2> ../changed_files.txt; then
+            echo "classification error: trusted classifier failed; failing closed" >&2
+            cat ../changed_files.txt >&2
+            exit 1
+          fi
+          cat ../classification.env >> "$GITHUB_OUTPUT"
+          cat ../changed_files.txt
+          cat ../classification.env
+        shell: bash
+
+      # --- short-circuit NOT_COMPARABLE for protected/retrieval changes ---
+      - name: Enforce changed-file classification
+        id: classify_decision
+        if: steps.classify.outputs.protected == '1' || steps.classify.outputs.retrieval == '1'
+        run: |
+          if [ "${{ steps.classify.outputs.protected }}" = "1" ]; then
+            reason="NOT_COMPARABLE_EVALUATOR"
+            msg="measurement apparatus changed (evaluator/metric/CLI/fixture/policy/baseline/contract/verify): the gate cannot referee its own referee; requires Measurement Change Review"
+          else
+            reason="NOT_COMPARABLE_RANKING_CONTRACT"
+            msg="retrieval-affecting change outside the frozen SUT manifest (knowledgebase_search_fusion.go): requires Measurement Change Review or an explicit SUT-manifest extension"
+          fi
+          cat > comparison.json <<JSON
+          {"schema_version":"regression_comparison/1","decision":"NOT_COMPARABLE","baseline_id":"B001","policy_id":"quality-core-v1","preflight":{"decision":"NOT_COMPARABLE","reason_codes":["$reason"]},"metrics":[],"failed_rules":[]}
+          JSON
+          echo "decision_exit=3" >> "$GITHUB_OUTPUT"
+          echo "decision_exit=3" >> "$GITHUB_ENV"
+          echo "$msg"
+          echo "comparison.json:"
+          cat comparison.json
+        shell: bash
+
+      - name: Set up Go
+        if: steps.classify.outputs.protected != '1' && steps.classify.outputs.retrieval != '1'
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: trusted/go.sum
+
+      # Build the trusted comparator BEFORE overlaying the candidate ranking
+      # seam, so the referee is 100% base-SHA code.
+      - name: Build trusted comparator (base SHA)
+        if: steps.classify.outputs.protected != '1' && steps.classify.outputs.retrieval != '1'
+        working-directory: trusted
+        run: go build -o /tmp/evaluation-regression-trusted ./cmd/evaluation-regression/
+
+      # AST/import-allowlist validation from the trusted base binary. This is
+      # intentionally not duplicated as a grep blacklist: aliases and package
+      # initializers must not bypass the executable SUT boundary.
+      - name: Audit candidate SUT boundary
+        if: steps.classify.outputs.protected != '1' && steps.classify.outputs.retrieval != '1'
+        run: |
+          /tmp/evaluation-regression-trusted validate-ranking-seam \
+            --ranking-file candidate/internal/application/service/knowledgebase_search_fusion.go
+        shell: bash
+
+      # P0-1: overlay ONLY the candidate's production ranking seam (the SUT)
+      # onto the trusted evaluator. The evaluator (runner + metric) and the
+      # comparator stay base-SHA.
+      - name: Overlay candidate ranking seam (SUT) onto trusted evaluator
+        if: steps.classify.outputs.protected != '1' && steps.classify.outputs.retrieval != '1'
+        run: |
+          cp candidate/internal/application/service/knowledgebase_search_fusion.go \
+             trusted/internal/application/service/knowledgebase_search_fusion.go
+
+      - name: Build runner (trusted evaluator + candidate SUT)
+        if: steps.classify.outputs.protected != '1' && steps.classify.outputs.retrieval != '1'
+        working-directory: trusted
+        run: go build -o /tmp/evaluation-regression ./cmd/evaluation-regression/
+
+      # --- deterministic run ----------------------------------------------
+      # Runs with CWD=trusted so the manifest's repo-root-relative component
+      # paths resolve to the trusted evaluator files. The runner VERIFIES the
+      # evaluator hash against the frozen contract (fail-closed on mismatch),
+      # enforces the SUT boundary, and records the candidate ranking seam
+      # identity from --ranking-file.
+      - name: Run deterministic retrieval
+        id: run
+        if: steps.classify.outputs.protected != '1' && steps.classify.outputs.retrieval != '1'
+        working-directory: trusted
+        run: |
+          /tmp/evaluation-regression run \
+            --fixture      tests/evaluation/fixtures/retrieval_core_v1.json \
+            --policy       tests/evaluation/policies/quality_core_v1.json \
+            --contract     tests/evaluation/evaluator_contract.json \
+            --manifest     tests/evaluation/evaluator_artifact_manifest.json \
+            --ranking-file ../candidate/internal/application/service/knowledgebase_search_fusion.go \
+            --out          ../candidate_result.json
+        shell: bash
+
+      # --- comparison (trusted) -------------------------------------------
+      # The comparator runs from the BASE SHA so the candidate cannot redefine
+      # the referee. A non-zero exit is intentional and must be propagated.
+      - name: Compare against protected baseline
+        id: compare
+        if: steps.classify.outputs.protected != '1' && steps.classify.outputs.retrieval != '1'
+        run: |
+          set +e
+          /tmp/evaluation-regression-trusted compare \
+            --baseline  trusted/tests/evaluation/baselines/baseline_B001_manifest.json \
+            --candidate candidate_result.json \
+            --policy    trusted/tests/evaluation/policies/quality_core_v1.json \
+            --out       comparison.json
+          code=$?
+          echo "decision_exit=$code" >> "$GITHUB_OUTPUT"
+          echo "decision_exit=$code" >> "$GITHUB_ENV"
+          cat comparison.json
+          exit 0
+        shell: bash
+
+      # --- upload artifacts unconditionally -------------------------------
+      # candidate_result.json exists only when the gate actually ran; for
+      # classification short-circuits the decision lives in comparison.json.
+      - name: Upload decision artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evaluation-regression-decision
+          path: |
+            candidate_result.json
+            comparison.json
+          if-no-files-found: warn
+          retention-days: 90
+
+      # --- map decision to job conclusion ---------------------------------
+      # 0 = PASS (success), 2/3/4 = failure (block/not-comparable/error).
+      # 1 = usage error (also a failure; must never be reported as success).
+      - name: Enforce decision
+        if: always()
+        run: |
+          code="${decision_exit:-4}"
+          case "$code" in
+            0) echo "PASS: no regression"; exit 0 ;;
+            2) echo "BLOCK: confirmed quality regression"; exit 2 ;;
+            3) echo "NOT_COMPARABLE: preflight or changed-file classification rejected comparison"; exit 3 ;;
+            4) echo "ERROR: infrastructure/execution failure"; exit 4 ;;
+            *) echo "ERROR: unexpected exit $code"; exit 4 ;;
+          esac
+        shell: bash

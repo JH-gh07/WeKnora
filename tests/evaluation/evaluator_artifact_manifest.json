@@ -1,0 +1,29 @@
+{
+  "measurement_contract_version": "retrieval-evaluator/1",
+  "metric_definition_version": "retrieval-metrics/1",
+  "evaluator_artifact_hash": "0c649eb0fadabfa4203330a002509084c8a223fa2b16ff93bcb27cd4d81325e4",
+  "hash_method": "SHA-256 over component files in sorted path order, each serialized as 'FILE <relative-path>\\n<file-bytes>' (no extra trailing newline).",
+  "ranking_contract_version": "retrieval-ranking/1",
+  "numeric_serialization_version": "go-json-float64/1",
+  "ranking_file": "internal/application/service/knowledgebase_search_fusion.go",
+  "ranking_artifact_hash": "ad0d4fab04af4e399cd4dac01e968b037cb800b58c96471ea16946845679f305",
+  "component_files": [
+    "internal/application/service/evaluation_regression.go",
+    "internal/application/service/metric/recall.go",
+    "internal/application/service/metric/mrr.go",
+    "internal/application/service/metric/ndcg.go",
+    "internal/application/service/metric/map.go",
+    "internal/application/service/metric/precision.go",
+    "internal/application/service/metric/common.go"
+  ],
+  "per_file_sha256": {
+    "internal/application/service/evaluation_regression.go": "ce8ab927948f9fb4ca91be47fc5787f6fad4ecd711ef485b31a2dbaca9cd5770",
+    "internal/application/service/metric/recall.go": "b7111ea9e19ddf2a6d5762d7a7e6485d9f9a5ca1e8eb26846d7c232c6ff24f1e",
+    "internal/application/service/metric/mrr.go": "bb5ebe90b7be0cd4b3d16f81c488c039bb2a9768eef957831b5e4021a6f6bb96",
+    "internal/application/service/metric/ndcg.go": "3dd879f0126625ab54d345e02693090e1d224663abf66675b62947cec4d122e6",
+    "internal/application/service/metric/map.go": "694f13f30453fc8428e6d76c31ee3c51595c88474d90a034bcc666de8ac6f18a",
+    "internal/application/service/metric/precision.go": "d4da6839314a73017a73c98a6aa6a987072b96662f77b33b5697795bccb1ea31",
+    "internal/application/service/metric/common.go": "83f96c9356097ea81dfc002143975db654734bdf39ca8db1a1b41454a20fb623"
+  },
+  "excluded_notes": "Comparator/preflight (evaluation_regression_comparator.go) is trusted control-plane code, not the evaluator; it runs from the protected base SHA and is not part of the evaluator_artifact_hash. The production ranking seam (knowledgebase_search_fusion.go) is the SUT, NOT the evaluator: its identity is recorded separately as ranking_artifact_hash (ALLOWED to differ across candidates); a candidate may change it, but must not regress metrics."
+}

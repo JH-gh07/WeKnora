@@ -80,6 +80,12 @@ var contextCloneAcrossDetach = map[ContextKey]bool{
 	// the ingestion storm the governor exists to contain run past it. Keeping
 	// it can only over-throttle a context that is background by definition.
 	BackgroundTaskContextKey: true,
+	// Evaluation/model-call attribution must follow work that is deliberately
+	// detached from its request. Losing these identifiers would persist the
+	// same call as ordinary run_id=NULL traffic after the detach boundary.
+	LLMRunIDContextKey:   true,
+	LLMTaskIDContextKey:  true,
+	LLMTraceIDContextKey: true,
 	// Marks a channel that cannot resolve an in-conversation MCP OAuth prompt
 	// (an IM bot has no live client to click "Authorize"). Dropping it makes
 	// the agent block on the OAuth wait for every unauthorized service instead

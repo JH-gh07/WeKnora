@@ -1,0 +1,120 @@
+{
+  "schema_version": "retrieval-core/1",
+  "fixture_id": "retrieval-core-v1",
+  "top_k": 10,
+  "tie_breaker": "chunk_id_lexicographic_asc",
+  "rrf_k": 60,
+  "rrf_vector_weight": 0.7,
+  "rrf_keyword_weight": 0.3,
+  "queries": [
+    {
+      "qid": 1,
+      "query": "synthetic exact match query 1",
+      "relevant_ids": [1, 2, 3],
+      "vector_candidates": [
+        {"doc_id": 1, "score": 1.0},
+        {"doc_id": 2, "score": 0.9},
+        {"doc_id": 3, "score": 0.8},
+        {"doc_id": 4, "score": 0.7},
+        {"doc_id": 5, "score": 0.6}
+      ],
+      "keyword_candidates": []
+    },
+    {
+      "qid": 2,
+      "query": "synthetic ranking sensitivity query 2",
+      "relevant_ids": [1, 2],
+      "vector_candidates": [
+        {"doc_id": 3, "score": 1.0},
+        {"doc_id": 1, "score": 0.9},
+        {"doc_id": 4, "score": 0.8},
+        {"doc_id": 2, "score": 0.7}
+      ],
+      "keyword_candidates": []
+    },
+    {
+      "qid": 3,
+      "query": "synthetic zero relevant query 3",
+      "relevant_ids": [1],
+      "vector_candidates": [
+        {"doc_id": 2, "score": 1.0},
+        {"doc_id": 3, "score": 0.9},
+        {"doc_id": 4, "score": 0.8}
+      ],
+      "keyword_candidates": []
+    },
+    {
+      "qid": 4,
+      "query": "synthetic truncation beyond topk query 4",
+      "relevant_ids": [1],
+      "vector_candidates": [
+        {"doc_id": 2, "score": 1.0},
+        {"doc_id": 3, "score": 0.9},
+        {"doc_id": 4, "score": 0.8},
+        {"doc_id": 5, "score": 0.7},
+        {"doc_id": 6, "score": 0.6},
+        {"doc_id": 7, "score": 0.5},
+        {"doc_id": 8, "score": 0.4},
+        {"doc_id": 9, "score": 0.3},
+        {"doc_id": 10, "score": 0.2},
+        {"doc_id": 11, "score": 0.1},
+        {"doc_id": 1, "score": 0.05}
+      ],
+      "keyword_candidates": []
+    },
+    {
+      "qid": 5,
+      "query": "synthetic empty retrieval query 5",
+      "relevant_ids": [1],
+      "vector_candidates": [],
+      "keyword_candidates": []
+    },
+    {
+      "qid": 6,
+      "query": "synthetic hybrid rrf query 6",
+      "relevant_ids": [1, 2],
+      "vector_candidates": [
+        {"doc_id": 1, "score": 1.0},
+        {"doc_id": 2, "score": 0.5},
+        {"doc_id": 3, "score": 0.4}
+      ],
+      "keyword_candidates": [
+        {"doc_id": 2, "score": 1.0},
+        {"doc_id": 3, "score": 0.9},
+        {"doc_id": 1, "score": 0.8}
+      ]
+    },
+    {
+      "qid": 7,
+      "query": "synthetic duplicate candidate query 7",
+      "relevant_ids": [1],
+      "vector_candidates": [
+        {"doc_id": 1, "score": 1.0},
+        {"doc_id": 2, "score": 0.9}
+      ],
+      "keyword_candidates": [
+        {"doc_id": 1, "score": 1.0},
+        {"doc_id": 3, "score": 0.8}
+      ]
+    },
+    {
+      "qid": 8,
+      "query": "synthetic relevant at topk boundary query 8",
+      "relevant_ids": [1],
+      "vector_candidates": [
+        {"doc_id": 2, "score": 1.0},
+        {"doc_id": 3, "score": 0.9},
+        {"doc_id": 4, "score": 0.8},
+        {"doc_id": 5, "score": 0.7},
+        {"doc_id": 6, "score": 0.6},
+        {"doc_id": 7, "score": 0.5},
+        {"doc_id": 8, "score": 0.4},
+        {"doc_id": 9, "score": 0.3},
+        {"doc_id": 10, "score": 0.2},
+        {"doc_id": 1, "score": 0.15},
+        {"doc_id": 11, "score": 0.1}
+      ],
+      "keyword_candidates": []
+    }
+  ]
+}

@@ -33,12 +33,21 @@ type Config struct {
 	PromptTemplates *PromptTemplatesConfig `yaml:"prompt_templates" json:"prompt_templates"`
 	IM              *IMConfig              `yaml:"im"               json:"im"`
 	Agent           *AgentConfig           `yaml:"agent"            json:"agent"`
+	EmbeddingCache  *EmbeddingCacheConfig  `yaml:"embedding_cache"  json:"embedding_cache"`
 	// FrontendBaseURL is the externally-visible origin of the SPA, used
 	// to compose absolute share-link URLs. Empty falls back to a host-
 	// relative URL ("/register?token=…") which the SPA then resolves
 	// against window.location.origin — fine for typical single-origin
 	// deployments. Sourced from FRONTEND_BASE_URL env at startup.
 	FrontendBaseURL string `yaml:"frontend_base_url" json:"frontend_base_url"`
+}
+
+// EmbeddingCacheConfig controls the local embedding cache rollout switch
+// (Decision 005-4). It defaults to disabled for backward compatibility; an
+// operator opts in via config.yaml `embedding_cache.enabled: true` or
+// `WEKNORA_EMBEDDING_CACHE_ENABLED=true`.
+type EmbeddingCacheConfig struct {
+	Enabled bool `yaml:"enabled" json:"enabled"`
 }
 
 // AgentConfig represents the global agent settings.
@@ -582,6 +591,7 @@ func LoadConfig() (*Config, error) {
 	applyKnowledgeBaseEnvOverrides(&cfg)
 	applyAuthAndTenantDefaults(&cfg)
 	applyAuditDefaults(&cfg)
+	applyEmbeddingCacheEnvOverrides(&cfg)
 
 	if err := ValidateConfig(&cfg); err != nil {
 		return nil, err
@@ -928,6 +938,19 @@ func applyAuditDefaults(cfg *Config) {
 		if n, err := strconv.Atoi(value); err == nil && n >= 0 {
 			cfg.Audit.RetentionDays = n
 		}
+	}
+}
+
+// applyEmbeddingCacheEnvOverrides wires the local embedding cache rollout
+// switch. The section defaults to nil (disabled); an explicit env flag enables
+// it so a stale shell variable cannot silently enable the cache for a future
+// deployment.
+func applyEmbeddingCacheEnvOverrides(cfg *Config) {
+	if cfg.EmbeddingCache == nil {
+		cfg.EmbeddingCache = &EmbeddingCacheConfig{}
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_EMBEDDING_CACHE_ENABLED")); value != "" {
+		cfg.EmbeddingCache.Enabled = strings.EqualFold(value, "true")
 	}
 }
 

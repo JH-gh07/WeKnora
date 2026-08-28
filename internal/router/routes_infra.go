@@ -87,6 +87,12 @@ func RegisterEvaluationRoutes(r *gin.RouterGroup, handler *handler.EvaluationHan
 	}
 }
 
+func RegisterModelUsageRoutes(r *gin.RouterGroup, h *handler.ModelUsageHandler, g *rbacGuards) {
+	usage := g.apiKeyGroup(r.Group("/model-usage"), apiKeyManageModels(apiKeyFullAccess()))
+	usage.GET("", g.Viewer(), h.Aggregate)
+	usage.GET("/health", g.Viewer(), h.Health)
+}
+
 func RegisterInitializationRoutes(r *gin.RouterGroup, handler *handler.InitializationHandler, g *rbacGuards) {
 	// 初始化接口
 	// GetCurrentConfigByKB 是只读，Viewer+ 即可（KB 受限 key 可读其范围内的 KB）。

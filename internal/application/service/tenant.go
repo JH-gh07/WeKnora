@@ -21,13 +21,22 @@ type ListTenantsParams struct {
 
 // tenantService implements the TenantService interface
 type tenantService struct {
-	repo        interfaces.TenantRepository // Repository for tenant data operations
-	storageRepo interfaces.StorageBackendRepository
+	repo           interfaces.TenantRepository // Repository for tenant data operations
+	storageRepo    interfaces.StorageBackendRepository
+	embeddingCache interfaces.EmbeddingCacheRepository
 }
 
-// NewTenantService creates a new tenant service instance
+// NewTenantService preserves the pre-cache constructor for callers that do
+// not assemble the full production dependency graph.
 func NewTenantService(repo interfaces.TenantRepository, storageRepo interfaces.StorageBackendRepository) interfaces.TenantService {
-	return &tenantService{repo: repo, storageRepo: storageRepo}
+	return NewTenantServiceWithEmbeddingCache(repo, storageRepo, nil)
+}
+
+// NewTenantServiceWithEmbeddingCache creates the production tenant service.
+// When the repository is present, DeleteTenant purges tenant-owned embedding
+// cache rows before deleting the tenant control fact.
+func NewTenantServiceWithEmbeddingCache(repo interfaces.TenantRepository, storageRepo interfaces.StorageBackendRepository, embeddingCache interfaces.EmbeddingCacheRepository) interfaces.TenantService {
+	return &tenantService{repo: repo, storageRepo: storageRepo, embeddingCache: embeddingCache}
 }
 
 // CreateTenant creates a new tenant
@@ -188,6 +197,20 @@ func (s *tenantService) DeleteTenant(ctx context.Context, id uint64) error {
 		}
 	} else {
 		logger.Infof(ctx, "Deleting tenant, ID: %d, name: %s", id, tenant.Name)
+	}
+
+	// Purge the tenant's local embedding cache rows before deleting the tenant.
+	// A purge failure fails the delete closed so orphaned cache rows are never
+	// silently left behind claiming a clean tenant delete. The cache is an
+	// optimization, so a (hypothetical) purge-then-delete failure is harmless:
+	// the next query simply repopulates.
+	if s.embeddingCache != nil {
+		if err := s.embeddingCache.DeleteByTenant(ctx, id); err != nil {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"tenant_id": id,
+			})
+			return err
+		}
 	}
 
 	err = s.repo.DeleteTenant(ctx, id)
