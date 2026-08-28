@@ -6594,5 +6594,49 @@ export default {
     myChats: '내 대화',
     apiChats: 'API 세션',
     noSessions: '대화가 없습니다'
+  },
+  modelUsage: {
+    title: '모델 사용량',
+    description: '현재 워크스페이스와 UTC 시간 범위의 읽기 전용 사용량',
+    modelLabel: '모델',
+    allMetered: '모든 계량 모델',
+    timePreset: '시간 범위',
+    windowLabel: 'UTC 범위',
+    measurementBoundary: '측정 완전성은 단일 모델이 아니라 현재 워크스페이스와 시간 범위를 기준으로 합니다.',
+    logicalCalls: '논리 호출',
+    success: '성공',
+    failure: '실패',
+    promptCacheCoverage: '프롬프트 캐시 보고 범위',
+    cachedTokenRatio: '캐시 토큰 비율',
+    localEmbeddingCache: '로컬 임베딩 캐시',
+    localLookupFailed: '{count}회 캐시 조회 실패',
+    localCorruption: '{count}개의 손상 항목 거부됨',
+    localWriteFailed: '{count}회 캐시 쓰기 실패',
+    knownCost: '알려진 추정 비용',
+    unknownPriceCalls: '가격을 알 수 없는 호출 {count}건',
+    costDisclaimer: '과거 가격 기준 추정치이며 청구 합계가 아닙니다.',
+    contractAnomaly: '계약 이상이 감지되었습니다 — 영향을 받은 값은 알 수 없음으로 표시됩니다',
+    measurementHealth: '측정 상태',
+    attempted: '시도',
+    persisted: '저장됨',
+    failed: '실패',
+    loading: '사용량 로드 중…',
+    empty: '이 범위에 논리 호출이 없습니다',
+    error: '사용량을 불러오지 못했습니다',
+    retry: '재시도',
+    meteringNotImplemented: '계량 미구현',
+    availability: {
+      available: '사용 가능',
+      notImplemented: '미구현',
+      unsupported: '제공자가 지원하지 않음',
+      unreported: '제공자가 보고하지 않음',
+      unknown: '알 수 없음',
+      disabled: '비활성화됨'
+    },
+    health: {
+      complete: '워크스페이스 범위 측정 완료',
+      partial: '워크스페이스 범위 측정 부분',
+      unknown: '워크스페이스 범위 측정 알 수 없음'
+    }
   }
 }

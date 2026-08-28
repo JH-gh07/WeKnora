@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -32,6 +33,9 @@ type modelService struct {
 	pooler        embedding.EmbedderPooler
 	tenantService interfaces.TenantService
 	callRecorder  types.ModelCallRecorder
+
+	embeddingCache        interfaces.EmbeddingCacheRepository
+	embeddingCacheEnabled bool
 }
 
 // NewMeteredModelService is the production constructor. The unmetered
@@ -44,9 +48,13 @@ func NewMeteredModelService(repo interfaces.ModelRepository,
 	pooler embedding.EmbedderPooler,
 	tenantService interfaces.TenantService,
 	callRecorder interfaces.ModelCallRepository,
+	embeddingCache interfaces.EmbeddingCacheRepository,
+	cfg *config.Config,
 ) interfaces.ModelService {
 	svc := NewModelService(repo, kbRepo, agentRepo, ollamaService, pooler, tenantService).(*modelService)
 	svc.callRecorder = callRecorder
+	svc.embeddingCache = embeddingCache
+	svc.embeddingCacheEnabled = cfg != nil && cfg.EmbeddingCache != nil && cfg.EmbeddingCache.Enabled
 	return svc
 }
 
@@ -464,6 +472,15 @@ func (s *modelService) DeleteModel(ctx context.Context, id string) error {
 		return err
 	}
 
+	// Purge any local embedding cache facts for the deleted model. This is
+	// best-effort lifecycle cleanup: a purge failure never blocks the delete,
+	// and the cache identity already guarantees old entries can no longer hit.
+	if s.embeddingCache != nil {
+		if purgeErr := s.embeddingCache.DeleteByModel(ctx, tenantID, id); purgeErr != nil {
+			logger.Errorf(ctx, "embedding cache purge after model delete failed: %v", purgeErr)
+		}
+	}
+
 	logger.Infof(ctx, "Model deleted successfully: %s", id)
 	return nil
 }
@@ -484,7 +501,8 @@ func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (e
 
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
-	embedder, err := embedding.NewEmbedder(s.embeddingConfig(model, appID, appSecret), s.pooler, s.ollamaService)
+	cfg := s.embeddingConfig(model, appID, appSecret)
+	embedder, err := embedding.NewEmbedder(cfg, s.pooler, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -492,6 +510,9 @@ func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (e
 		})
 		return nil, err
 	}
+
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	embedder = s.wrapEmbeddingCache(embedder, cfg, tenantID)
 
 	logger.Info(ctx, "Embedding model initialized successfully")
 	return embedder, nil
@@ -531,7 +552,8 @@ func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId s
 
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
-	embedder, err := embedding.NewEmbedder(s.embeddingConfig(model, appID, appSecret), s.pooler, s.ollamaService)
+	cfg := s.embeddingConfig(model, appID, appSecret)
+	embedder, err := embedding.NewEmbedder(cfg, s.pooler, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -541,8 +563,26 @@ func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId s
 		return nil, err
 	}
 
+	embedder = s.wrapEmbeddingCache(embedder, cfg, tenantID)
+
 	logger.Info(ctx, "Cross-tenant embedding model initialized successfully")
 	return embedder, nil
+}
+
+// wrapEmbeddingCache installs the tenant-scoped local embedding cache as the
+// outermost decorator when the rollout switch is enabled. It is a no-op when
+// disabled, so the original metered provider path is preserved.
+func (s *modelService) wrapEmbeddingCache(e embedding.Embedder, cfg embedding.Config, tenantID uint64) embedding.Embedder {
+	if !s.embeddingCacheEnabled || s.embeddingCache == nil || e == nil {
+		return e
+	}
+	return embedding.WrapEmbeddingCache(e, embedding.CacheOptions{
+		Enabled:  true,
+		TenantID: tenantID,
+		Store:    s.embeddingCache,
+		Observer: s.embeddingCache,
+		Config:   cfg,
+	})
 }
 
 // GetRerankModel retrieves and initializes a reranking model instance

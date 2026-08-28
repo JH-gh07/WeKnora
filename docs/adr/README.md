@@ -37,12 +37,13 @@ A Registry entry may move to `ACCEPTED` only when its owning test/Evidence is id
 | ADR-004 | Unknown/unreported/unsupported measurement is not numeric zero | `ACCEPTED` | G2A | Providers expose a uniform, provably complete contract |
 | ADR-005 | Use startup reconciliation inside the current single-worker deployment | `ACCEPTED_WITH_BOUNDARY` | G1 | Multi-replica workers, MQ, lease, or scheduler is introduced |
 | ADR-006 | Required regression CI uses deterministic core; provider experiments are separate | `ACCEPTED_DESIGN` | G5 | Official acceptance requires live-provider blocking |
-| ADR-007 | Embedding Cache identity represents the computation, not only text | `PROPOSED` | G3 | G3 source/experiment evidence selects the concrete key |
+| ADR-007 | Embedding Cache identity represents the computation, not only text | `ACCEPTED_DESIGN` | G3 | G3 source/experiment evidence selects the concrete key |
 | ADR-008 | Do not introduce a global Model Gateway for P0 | `ACCEPTED` | G2A | Additional model families cause verified duplication or drift |
 | ADR-009 | Local Embedding Cache and Provider Prompt Cache use separate facts and metrics | `ACCEPTED_DESIGN` | G3/G4 | A provider exposes a single verifiable semantic contract |
 | ADR-010 | Availability state is separate from nullable metric value | `ACCEPTED_DESIGN` | G2B | API/UI compatibility review requires a versioned replacement |
 | ADR-011 | Failure authority depends on fact class | `ACCEPTED_DESIGN` | G1–G6 | Runtime Evidence proves a safer replacement policy |
 | ADR-012 | Latency budgets are declared before ON measurements | `ACCEPTED_DESIGN` | G3/G6 | Repository-wide SLO/performance policy supersedes it |
+| ADR-013 | Deterministic retrieval gate reuses the production ranking seam with an explicit tie-breaker | `ACCEPTED_DESIGN` | G5 | Production ranking comparator semantics change |
 
 ## ADR-001 — Protocol and provenance are different facts
 
@@ -278,6 +279,28 @@ Any Task adding synchronous work to a request path declares its fixture, SLO/hea
 - Real-provider latency remains advisory and uses counter-balanced ordering with disclosed failures.
 - Existing Task003 measurements remain historical facts; v0.2 does not invent a threshold after the run.
 - A later repository-wide SLO/performance policy may supersede this compact decision.
+
+## ADR-013 — Deterministic regression reuses the production ranking seam with an explicit tie-breaker
+
+### Context
+
+The required quality gate (R4, G5) must prove that a change to production retrieval code can genuinely change the reported metrics — otherwise the gate is vacuous. But an offline deterministic runner must not become a second, parallel retrieval implementation, and it must not depend on Go map iteration order, which is non-deterministic.
+
+### Decision
+
+The offline runner consumes a frozen fixture of precomputed scores and calls the production ranking/selection seam `fuseOrDeduplicate` (RRF fusion / score-desc dedup) directly, trusting its output order. Production `sortByScoreDesc` is made a total order by adding a `ChunkID`-ascending tie-breaker on equal score, removing the map-iteration non-determinism at its source.
+
+### Consequences and boundary
+
+- A regression in the production ranking seam (e.g. a wrong comparator direction, or a coverage collapse) now changes the runner's metrics and is caught by the comparator as BLOCK.
+- The runner is a deterministic extraction of production, not a second retrieval implementation and not a hand-written metric comparison.
+- The tie-breaker change is a production-code change (8 lines in `knowledgebase_search_fusion.go`) recorded as `ranking_artifact_hash` — the SUT identity, which is ALLOWED to differ across candidates — and is deliberately NOT part of the evaluator artifact (the evaluator is only the runner + metric implementations). Any change to the evaluator apparatus requires re-freezing the evaluator hash and re-verifying against the frozen contract; any change to ranking comparator semantics requires re-freezing the ranking identity and promoting a new baseline.
+- The SUT is also a trust boundary, not just an identity: the candidate-owned ranking seam is constrained to a reviewed Go import allowlist and may not use import aliases, package-level variables, or `init()` side effects. `ValidateRankingSeamSource` enforces this with the Go AST before the seam is hashed (`RankingSeamIdentity`); the identity uses the frozen logical code path plus content, not the caller's checkout path. The trusted-base workflow invokes that validator before overlay and uses a NUL-safe `git diff --no-renames --name-status -z` classifier to fail closed (NOT_COMPARABLE) for measurement-apparatus or retrieval changes outside the SUT manifest. This is a source boundary, not a claim of host-level network sandboxing.
+- Determinism is still bounded by Go float64 serialization (`go-json-float64/1`) and a fixed OS/arch reproduction rule.
+
+### Evidence locator
+
+Repository tests: `internal/application/service/evaluation_regression_test.go`. Runtime delivery evidence: shared-workspace-relative `../../../status/evidence/task007/`.
 
 ## Change protocol
 

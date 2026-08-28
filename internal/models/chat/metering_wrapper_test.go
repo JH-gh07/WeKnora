@@ -67,7 +67,7 @@ func TestMeteredChatCapturesUsageAndScope(t *testing.T) {
 		t.Fatalf("calls=%d", len(recorder.calls))
 	}
 	call := recorder.calls[0]
-	if call.TenantID != 42 || call.RunID == nil || *call.RunID != "run-1" || call.InputTokens == nil || *call.InputTokens != 12 || call.CacheStatus != types.PromptCacheStatusHit {
+	if call.TenantID != 42 || call.RunID == nil || *call.RunID != "run-1" || call.InputTokens == nil || *call.InputTokens != 12 || call.CacheReportedInputTokens == nil || *call.CacheReportedInputTokens != 12 || call.CacheStatus != types.PromptCacheStatusHit {
 		t.Fatalf("call=%+v", call)
 	}
 }

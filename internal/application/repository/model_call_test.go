@@ -38,7 +38,7 @@ func TestModelCallRepositoryNullSafeAggregateAndTenantIsolation(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	runID := "run-a"
 	calls := []*types.ModelCall{
-		{ID: "known", TenantID: 1, RunID: &runID, ModelID: "chat-a", ModelName: "chat", Provider: "fixture", Operation: types.ModelOperationChat, InputTokens: intPtr(10), OutputTokens: intPtr(5), CacheReadTokens: intPtr(2), UsageFinality: types.UsageFinalityReported, CacheStatus: types.PromptCacheStatusHit, Success: true, EstimatedCost: floatPtr(0.125), Currency: "USD", PricingVersion: "fixture-v1", PricingSource: "test", PricingEffectiveAt: &now, AttemptObservability: types.AttemptObservabilityUnobservable, CreatedAt: now},
+		{ID: "known", TenantID: 1, RunID: &runID, ModelID: "chat-a", ModelName: "chat", Provider: "fixture", Operation: types.ModelOperationChat, InputTokens: intPtr(10), OutputTokens: intPtr(5), CacheReadTokens: intPtr(2), CacheReportedInputTokens: intPtr(10), UsageFinality: types.UsageFinalityReported, CacheStatus: types.PromptCacheStatusHit, Success: true, EstimatedCost: floatPtr(0.125), Currency: "USD", PricingVersion: "fixture-v1", PricingSource: "test", PricingEffectiveAt: &now, AttemptObservability: types.AttemptObservabilityUnobservable, CreatedAt: now},
 		{ID: "unknown", TenantID: 1, ModelID: "rerank-a", ModelName: "rerank", Provider: "fixture", Operation: types.ModelOperationRerank, UsageFinality: types.UsageFinalityUnavailable, CacheStatus: types.PromptCacheStatusUnsupported, Success: false, ErrorType: "provider_error", AttemptObservability: types.AttemptObservabilityUnobservable, CreatedAt: now.Add(time.Second)},
 		{ID: "other-tenant", TenantID: 2, ModelID: "chat-a", Operation: types.ModelOperationChat, UsageFinality: types.UsageFinalityUnavailable, CacheStatus: types.PromptCacheStatusUnreported, Success: true, AttemptObservability: types.AttemptObservabilityUnobservable, CreatedAt: now},
 	}
@@ -79,6 +79,12 @@ func TestModelCallRepositoryNullSafeAggregateAndTenantIsolation(t *testing.T) {
 	if agg.KnownCostTotal == nil || *agg.KnownCostTotal != 0.125 || agg.UnknownCostCallCount != 1 {
 		t.Fatalf("cost: %+v", agg)
 	}
+	if agg.Currency == nil || *agg.Currency != "USD" || agg.MixedCurrency {
+		t.Fatalf("currency identity: %+v", agg)
+	}
+	if agg.CacheReportedInputTokens == nil || *agg.CacheReportedInputTokens != 10 {
+		t.Fatalf("reported input denominator: %+v", agg)
+	}
 	if agg.CacheReportedCount != 1 || agg.CacheUnsupportedCount != 1 {
 		t.Fatalf("cache: %+v", agg)
 	}
@@ -93,6 +99,46 @@ func TestModelCallRepositoryNullSafeAggregateAndTenantIsolation(t *testing.T) {
 	otherAgg, err := repo.AggregateModelCalls(ctx, types.ModelCallFilter{TenantID: 2, From: &from, To: &to})
 	if err != nil || otherAgg.LogicalCallCount != 1 {
 		t.Fatalf("tenant aggregate: %+v err=%v", otherAgg, err)
+	}
+}
+
+func TestModelCallRepositoryAggregateFailsClosedForMixedCurrency(t *testing.T) {
+	db := newModelCallTestDB(t)
+	repo := NewModelCallRepository(db)
+	now := time.Now().UTC().Truncate(time.Second)
+	for _, call := range []*types.ModelCall{
+		{ID: "usd", TenantID: 11, ModelID: "m", Operation: types.ModelOperationChat, EstimatedCost: floatPtr(1), Currency: "USD", CacheStatus: types.PromptCacheStatusUnsupported, AttemptObservability: types.AttemptObservabilityUnobservable, CreatedAt: now},
+		{ID: "eur", TenantID: 11, ModelID: "m", Operation: types.ModelOperationChat, EstimatedCost: floatPtr(2), Currency: "EUR", CacheStatus: types.PromptCacheStatusUnsupported, AttemptObservability: types.AttemptObservabilityUnobservable, CreatedAt: now},
+	} {
+		if err := repo.CreateModelCall(context.Background(), call); err != nil {
+			t.Fatal(err)
+		}
+	}
+	from, to := now.Add(-time.Minute), now.Add(time.Minute)
+	agg, err := repo.AggregateModelCalls(context.Background(), types.ModelCallFilter{TenantID: 11, From: &from, To: &to})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agg.KnownCostTotal != nil || agg.Currency != nil || !agg.MixedCurrency {
+		t.Fatalf("mixed currency must fail closed: %+v", agg)
+	}
+}
+
+func TestModelCallRepositoryAggregateFailsClosedForMissingCurrency(t *testing.T) {
+	db := newModelCallTestDB(t)
+	repo := NewModelCallRepository(db)
+	now := time.Now().UTC().Truncate(time.Second)
+	call := &types.ModelCall{ID: "missing-currency", TenantID: 12, ModelID: "m", Operation: types.ModelOperationChat, EstimatedCost: floatPtr(1), CacheStatus: types.PromptCacheStatusUnsupported, AttemptObservability: types.AttemptObservabilityUnobservable, CreatedAt: now}
+	if err := repo.CreateModelCall(context.Background(), call); err != nil {
+		t.Fatal(err)
+	}
+	from, to := now.Add(-time.Minute), now.Add(time.Minute)
+	agg, err := repo.AggregateModelCalls(context.Background(), types.ModelCallFilter{TenantID: 12, From: &from, To: &to})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agg.KnownCostTotal != nil || agg.Currency != nil || agg.MixedCurrency {
+		t.Fatalf("missing currency must fail closed: %+v", agg)
 	}
 }
 

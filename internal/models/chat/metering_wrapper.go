@@ -111,6 +111,7 @@ func applyChatUsage(call *types.ModelCall, usage *types.TokenUsage) {
 		call.CacheReadTokens = intPointer(usage.CacheReadTokens)
 		call.CacheWriteTokens = intPointer(usage.CacheWriteTokens)
 		call.CacheMissTokens = intPointer(usage.CacheMissTokens)
+		call.CacheReportedInputTokens = intPointer(usage.PromptTokens)
 	}
 }
 

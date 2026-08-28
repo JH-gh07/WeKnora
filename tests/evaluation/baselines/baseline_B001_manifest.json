@@ -1,0 +1,27 @@
+{
+  "schema_version": "regression_baseline/1",
+  "baseline_id": "B001",
+  "source_commit": "55b8c99bbb243ef3f701bbda7bf042f26ebac9ac",
+  "source_ref": "feature/evaluation-runtime-metering-freeze",
+  "fixture_id": "retrieval-core-v1",
+  "top_k": 10,
+  "protocol_hash": "cf5cb4e31cbd717f7e0cd8e80106b7608904eb51a07b6643bcb460de9acfa6e5",
+  "dataset_content_hash": "b4b8d5ad1c7c1b1fc57a75b192d22ad3f01a78ff9625215272aa7bddf480f1d9",
+  "fixture_artifact_hash": "72f069cf6a1d82ec815c9699d799a8532c236ce44493412411b25b39874acbd7",
+  "measurement_contract_version": "retrieval-evaluator/1",
+  "evaluator_artifact_hash": "0c649eb0fadabfa4203330a002509084c8a223fa2b16ff93bcb27cd4d81325e4",
+  "metric_definition_version": "retrieval-metrics/1",
+  "comparison_policy_hash": "f5f17c7e59b6d20087b8c37c1b5c183b91b42465678c6630a6372fa0a8fb3f7f",
+  "ranking_artifact_hash": "ad0d4fab04af4e399cd4dac01e968b037cb800b58c96471ea16946845679f305",
+  "result_artifact_hash": "71e8838e540d12c605053960b824731d8f2396fc5b08cabc83db067a7abd5a82",
+  "metrics_valid": true,
+  "sample_count": 8,
+  "metrics": {
+    "precision": 0.275,
+    "recall": 0.625,
+    "mrr": 0.45,
+    "map": 0.45,
+    "ndcg3": 0.4233566009043177,
+    "ndcg10": 0.49249821951562756
+  }
+}

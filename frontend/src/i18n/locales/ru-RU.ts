@@ -6594,5 +6594,49 @@ export default {
     myChats: 'Мои чаты',
     apiChats: 'Сессии API',
     noSessions: 'Пока нет диалогов'
+  },
+  modelUsage: {
+    title: 'Использование моделей',
+    description: 'Использование только для чтения в текущем рабочем пространстве и окне UTC',
+    modelLabel: 'Модель',
+    allMetered: 'Все учитываемые модели',
+    timePreset: 'Диапазон времени',
+    windowLabel: 'Диапазон UTC',
+    measurementBoundary: 'Полнота измерений охватывает текущее рабочее пространство и окно времени, а не одну модель.',
+    logicalCalls: 'Логические вызовы',
+    success: 'Успешно',
+    failure: 'Ошибки',
+    promptCacheCoverage: 'Покрытие отчётности prompt-кэша',
+    cachedTokenRatio: 'Доля кэшированных токенов',
+    localEmbeddingCache: 'Локальный кэш эмбеддингов',
+    localLookupFailed: 'Не удалось {count} обращений к кэшу',
+    localCorruption: 'Отклонено {count} повреждённых записей',
+    localWriteFailed: 'Не удалось {count} записей в кэш',
+    knownCost: 'Известная оценочная стоимость',
+    unknownPriceCalls: '{count} вызовов с неизвестной ценой',
+    costDisclaimer: 'Оценка по историческим ценам; не является итогом для оплаты.',
+    contractAnomaly: 'Обнаружена аномалия контракта — затронутые значения показаны как «Неизвестно»',
+    measurementHealth: 'Полнота измерений',
+    attempted: 'Попыток',
+    persisted: 'Сохранено',
+    failed: 'Ошибок',
+    loading: 'Загрузка использования…',
+    empty: 'В этом окне нет логических вызовов',
+    error: 'Не удалось загрузить использование',
+    retry: 'Повторить',
+    meteringNotImplemented: 'Учёт не реализован',
+    availability: {
+      available: 'Доступно',
+      notImplemented: 'Не реализовано',
+      unsupported: 'Провайдер не поддерживает',
+      unreported: 'Провайдер не сообщил',
+      unknown: 'Неизвестно',
+      disabled: 'Отключено'
+    },
+    health: {
+      complete: 'Измерения за окно рабочего пространства полны',
+      partial: 'Измерения за окно рабочего пространства неполны',
+      unknown: 'Измерения за окно рабочего пространства неизвестны'
+    }
   }
 }

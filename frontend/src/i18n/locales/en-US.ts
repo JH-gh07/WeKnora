@@ -6594,5 +6594,49 @@ export default {
     capabilityRequired: 'Select at least one capability',
     loadFailed: 'Failed to load platform API keys',
     createFailed: 'Failed to create platform API key'
+  },
+  modelUsage: {
+    title: 'Model Usage',
+    description: 'Read-only usage for the current workspace and UTC time window',
+    modelLabel: 'Model',
+    allMetered: 'All metered models',
+    timePreset: 'Time range',
+    windowLabel: 'UTC range',
+    measurementBoundary: 'Measurement completeness covers the current workspace and time window, not a single model.',
+    logicalCalls: 'Logical calls',
+    success: 'Success',
+    failure: 'Failure',
+    promptCacheCoverage: 'Prompt-cache reporting coverage',
+    cachedTokenRatio: 'Cached-token ratio',
+    localEmbeddingCache: 'Local embedding cache',
+    localLookupFailed: '{count} cache lookups failed',
+    localCorruption: '{count} corrupt entries rejected',
+    localWriteFailed: '{count} cache writes failed',
+    knownCost: 'Known estimated cost',
+    unknownPriceCalls: '{count} calls have unknown pricing',
+    costDisclaimer: 'Estimated from historical pricing; not a billing total.',
+    contractAnomaly: 'Contract anomaly detected — affected values are shown as Unknown',
+    measurementHealth: 'Measurement health',
+    attempted: 'Attempted',
+    persisted: 'Persisted',
+    failed: 'Failed',
+    loading: 'Loading usage…',
+    empty: 'No logical calls in this window',
+    error: 'Failed to load usage',
+    retry: 'Retry',
+    meteringNotImplemented: 'Metering not implemented',
+    availability: {
+      available: 'Available',
+      notImplemented: 'Not implemented',
+      unsupported: 'Provider unsupported',
+      unreported: 'Provider did not report',
+      unknown: 'Unknown',
+      disabled: 'Disabled'
+    },
+    health: {
+      complete: 'Workspace-window measurement complete',
+      partial: 'Workspace-window measurement partial',
+      unknown: 'Workspace-window measurement unknown'
+    }
   }
 }
