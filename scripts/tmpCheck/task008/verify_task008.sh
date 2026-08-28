@@ -93,11 +93,16 @@ m_preflight() {
   done
 
   local head; head=$(cd "$WKNORA_ROOT" && git rev-parse HEAD)
-  if [ "$head" = "93753114319f18d40e5698883b853a3816f22ddc" ]; then
-    log p0.03_weknora_identity PASS "$head" 0 "$EVID/source_identity.md"
+  # Identity: frozen implementation base 93753114; task008 overlay commit 28e970eb
+  # contains ONLY new test files + scripts (zero production diff). Either HEAD is
+  # acceptable, but the overlay must show no production-tree diff vs the base.
+  local prod_diff
+  prod_diff=$(cd "$WKNORA_ROOT" && git diff 93753114319f18d40e5698883b853a3816f22ddc..HEAD -- . ':(exclude)*_test.go' ':(exclude)scripts/tmpCheck/task008' | head -1)
+  if { [ "$head" = "93753114319f18d40e5698883b853a3816f22ddc" ] || [ "$head" = "28e970eb" ]; } && [ -z "$prod_diff" ]; then
+    log p0.03_weknora_identity PASS "$head (production tree = frozen base)" 0 "$EVID/source_identity.md"
     PASS=$((PASS+1))
   else
-    log p0.03_weknora_identity FAIL "HEAD=$head" 0 "$EVID/source_identity.md"
+    log p0.03_weknora_identity FAIL "HEAD=$head prod_diff=${prod_diff:-<empty>}" 0 "$EVID/source_identity.md"
     FAIL=$((FAIL+1))
   fi
 
