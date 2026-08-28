@@ -283,8 +283,10 @@ mode_static() {
   if grep -q 'Classify changed files' "$WORKFLOW" \
     && grep -q 'NOT_COMPARABLE_EVALUATOR' "$WORKFLOW" \
     && grep -q 'NOT_COMPARABLE_RANKING_CONTRACT' "$WORKFLOW" \
+    && grep -q 'BOOTSTRAP_TRUSTED_CLASSIFIER_ABSENT' "$WORKFLOW" \
+    && grep -q "TRUSTED_CLASSIFIER" "$WORKFLOW" \
     && grep -q 'Audit candidate SUT boundary' "$WORKFLOW"; then
-    record "static.workflow_classification" PASS "changed-file classification + SUT boundary audit present (fail closed)"
+    record "static.workflow_classification" PASS "classification + bootstrap fail-closed path + SUT boundary audit present"
   else
     record "static.workflow_classification" FAIL "changed-file classification or SUT boundary audit missing"
   fi
@@ -511,12 +513,13 @@ mode_ci_contract() {
   [[ "$pc_count" -ge 2 ]] || ok=0
   # changed-file classification must be present (fail closed on unprotected changes)
   grep -q 'Classify changed files' "$WORKFLOW" || ok=0
+  grep -q 'BOOTSTRAP_TRUSTED_CLASSIFIER_ABSENT' "$WORKFLOW" || ok=0
   grep -q 'Audit candidate SUT boundary' "$WORKFLOW" || ok=0
   # Required checks are matched by context name. A generic `quality` job can
   # collide with another workflow/App, so enforce the frozen unique context.
   grep -Fq "name: $REQUIRED_CHECK_NAME" "$WORKFLOW" || ok=0
   if [[ "$ok" -eq 1 ]]; then
-    record "ci-contract.structure" PASS "pull_request-only/read-only/no-paths/no-dispatch/direct-base+head/persist-credentials/classification/check=$REQUIRED_CHECK_NAME"
+    record "ci-contract.structure" PASS "pull_request-only/read-only/no-paths/no-dispatch/direct-base+head/persist-credentials/bootstrap-fail-closed/classification/check=$REQUIRED_CHECK_NAME"
   else
     record "ci-contract.structure" FAIL "workflow structure violated"
   fi

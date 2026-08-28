@@ -107,7 +107,17 @@ jobs:
             cat ../changed_files.err >&2
             exit 1
           fi
-          if ! ../trusted/scripts/tmpCheck/task007/classify_changed_files.sh \
+          TRUSTED_CLASSIFIER=../trusted/scripts/tmpCheck/task007/classify_changed_files.sh
+          if [ ! -x "$TRUSTED_CLASSIFIER" ]; then
+            # BOOTSTRAP_TRUSTED_CLASSIFIER_ABSENT: the first PR introducing the
+            # gate cannot trust the candidate's classifier. Treat the whole PR
+            # as a measurement-apparatus change and require explicit review.
+            # This is NOT a bypass: it deterministically fails closed as
+            # NOT_COMPARABLE_EVALUATOR in the next step.
+            printf 'protected=1\nretrieval=0\n' > ../classification.env
+            echo "bootstrap: trusted classifier absent on base; measurement change review required" \
+              > ../changed_files.txt
+          elif ! "$TRUSTED_CLASSIFIER" \
               < ../changed_files.z > ../classification.env 2> ../changed_files.txt; then
             echo "classification error: trusted classifier failed; failing closed" >&2
             cat ../changed_files.txt >&2
