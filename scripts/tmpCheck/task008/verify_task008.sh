@@ -23,6 +23,13 @@ WKNORA_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 STATUS_ROOT="${WKNORA_ROOT%/WeKnora}/status"
 EVID="$STATUS_ROOT/evidence/task008"
 cd "$WKNORA_ROOT"
+
+# Deterministic locale: the verifier must not depend on the caller's terminal
+# locale. Evidence paths/content contain CJK; force a UTF-8 locale for the
+# shell and UTF-8 mode for Python (filesystem decoding of Chinese paths).
+export LC_ALL="${LC_ALL:-en_US.UTF-8}"
+export LANG="${LANG:-en_US.UTF-8}"
+export PYTHONUTF8=1
 TS="$(date +%Y%m%d_%H%M%S)"
 RUN_DIR="/tmp/task008-verify/$TS"
 mkdir -p "$RUN_DIR"
@@ -141,6 +148,73 @@ PYEOF
     fi
   done < "$EVID/evidence_input_manifest.tsv"
   [ "$bad" = "1" ] && echo "WARN: upstream evidence dirs changed since manifest freeze" >&2
+
+  # p0.05: Task008 own evidence output manifest (per-file sha256 + root digest;
+  # scope = curated corpus, excluding the manifest itself and automated_*/).
+  python3 - "$EVID" <<'PYEOF' > "$RUN_DIR/p0.05_output_manifest.log" 2>&1
+import hashlib, os, sys
+evid = sys.argv[1]
+man = os.path.join(evid, "evidence_output_manifest.tsv")
+if not os.path.exists(man):
+    print("MISSING_MANIFEST")
+    sys.exit(1)
+rows = {}
+root_expect = None
+for line in open(man, encoding="utf-8"):
+    if line.startswith("#") or not line.strip():
+        continue
+    cols = line.rstrip("\n").split("\t")
+    if cols[0] == "path":
+        continue
+    if cols[0] == "__ROOT__":
+        root_expect = cols[1]
+        continue
+    rows[cols[0]] = (cols[1], cols[2])
+files = []
+for dp, dn, fn in os.walk(evid):
+    if dp.startswith(os.path.join(evid, "automated_")):
+        continue
+    for f in fn:
+        p = os.path.join(dp, f)
+        rel = os.path.relpath(p, evid)
+        if rel == "evidence_output_manifest.tsv":
+            continue
+        files.append(rel)
+files.sort()
+ok = True
+for rel in files:
+    want = rows.pop(rel, None)
+    b = open(os.path.join(evid, rel), "rb").read()
+    got = hashlib.sha256(b).hexdigest()
+    if want is None or want[0] != got or int(want[1]) != len(b):
+        print("MISMATCH %s" % rel)
+        ok = False
+if rows:
+    print("EXTRA_ROWS %s" % list(rows))
+    ok = False
+h = hashlib.sha256()
+for rel in files:
+    b = open(os.path.join(evid, rel), "rb").read()
+    h.update(("FILE %s\n" % rel).encode()); h.update(b)
+root_got = h.hexdigest()
+if root_expect != root_got:
+    print("ROOT_MISMATCH expect=%s got=%s" % (root_expect, root_got))
+    ok = False
+print("checked_files=%d ok=%s" % (len(files), ok))
+sys.exit(0 if ok else 1)
+PYEOF
+  if [ $? -eq 0 ]; then
+    log p0.05_output_manifest PASS "task008 evidence output manifest verified" 0 "$EVID/evidence_output_manifest.tsv"; PASS=$((PASS+1))
+  else
+    log p0.05_output_manifest FAIL "output manifest drift" 0 "$EVID/evidence_output_manifest.tsv"; FAIL=$((FAIL+1))
+  fi
+
+  # p0.06: locale probe — Python must handle CJK paths regardless of caller locale
+  if python3 -c 'import os, tempfile, shutil; d = tempfile.mkdtemp(); p = os.path.join(d, "证据路径测试.txt"); open(p, "w", encoding="utf-8").write("ok"); assert "证据路径测试.txt" in os.listdir(d); shutil.rmtree(d); print("utf8_fs_ok")' > "$RUN_DIR/p0.06_locale.log" 2>&1; then
+    log p0.06_locale PASS "UTF-8 filesystem handling verified" 0 "$EVID/preflight.md"; PASS=$((PASS+1))
+  else
+    log p0.06_locale FAIL "python cannot handle CJK paths under forced locale" 0 "$EVID/preflight.md"; FAIL=$((FAIL+1))
+  fi
 }
 
 m_reuse_audit() {
@@ -374,13 +448,18 @@ m_static() {
     log t4_diff_boundary FAIL "rogue paths: $(echo "$rogue" | head -3)" 0 "$EVID/diff_check.log"; FAIL=$((FAIL+1))
   fi
 
-  # residue: no task008 containers left behind
-  local res
-  res=$(docker ps -a --filter "name=weknora-task008" --format '{{.Names}}' 2>/dev/null)
-  if [ -z "$res" ]; then
-    log t5_residue PASS "no task008 containers left" 0 "$EVID/residue_scan.log"; PASS=$((PASS+1))
+  # residue: no task008 containers left behind. The check must key on the
+  # docker ps exit code; an unreachable daemon must NOT read as "no residue".
+  if docker info >/dev/null 2>&1; then
+    local res rc
+    res=$(docker ps -a --filter "name=weknora-task008" --format '{{.Names}}' 2>/dev/null); rc=$?
+    if [ "$rc" -eq 0 ] && [ -z "$res" ]; then
+      log t5_residue PASS "no task008 containers left" 0 "$EVID/residue_scan.log"; PASS=$((PASS+1))
+    else
+      log t5_residue FAIL "docker ps rc=$rc leftover: ${res:-<none>}" 0 "$EVID/residue_scan.log"; FAIL=$((FAIL+1))
+    fi
   else
-    log t5_residue FAIL "leftover: $res" 0 "$EVID/residue_scan.log"; FAIL=$((FAIL+1))
+    skip t5_residue "docker daemon unavailable; container residue cannot be inspected" "$EVID/residue_scan.log"
   fi
 
   # -race on Task008 scope packages. The pre-existing data race in
@@ -424,7 +503,7 @@ badskip=0
 while IFS=$'\t' read -r id status detail dur ev; do
   [ "$status" = "SKIP" ] || continue
   case "$id" in
-    c4_pg_runtime|k3_pg_parity|v3_github_required_check) : ;;  # allowed: docker/external facts with archived evidence
+    c4_pg_runtime|k3_pg_parity|v3_github_required_check|t5_residue) : ;;  # allowed: docker/external facts with archived evidence
     *) badskip=1; echo "P0 SKIP without allowed reason: $id ($detail)" >&2 ;;
   esac
 done < "$SUMMARY"
