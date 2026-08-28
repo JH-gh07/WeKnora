@@ -37,7 +37,25 @@ need jq
 mkdir -p "$OUT_DIR"
 
 api_public() {
-  local path="$1" output="$2" status
+  local path="$1" output="$2" status api_path error_file
+  api_path="repos/$REPO"
+  [[ -n "$path" ]] && api_path="$api_path/$path"
+
+  # Prefer authenticated reads when an authenticated GitHub CLI is available.
+  # Anonymous REST quotas are much smaller and can otherwise turn a healthy
+  # repository into a false 403/UNCONFIGURED audit result mid-run.
+  if has_authenticated_gh; then
+    error_file="$output.err"
+    if gh api "$api_path" > "$output" 2> "$error_file"; then
+      rm -f "$error_file"
+      printf '200'
+      return
+    fi
+    status="$(sed -nE 's/.*\(HTTP ([0-9]{3})\).*/\1/p' "$error_file" | tail -1)"
+    printf '%s' "${status:-000}"
+    return
+  fi
+
   local url="https://api.github.com/repos/$REPO"
   [[ -n "$path" ]] && url="$url/$path"
   status="$(curl -sS -L \
