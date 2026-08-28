@@ -35,18 +35,28 @@ func fuseOrDeduplicate(ctx context.Context, vectorResults, keywordResults []*typ
 		// Vector-only: keep original embedding scores (important for FAQ)
 		result := deduplicateByScore(vectorResults)
 		logger.Infof(ctx, "Result count after deduplication: %d", len(result))
-		return result
+		return collapseRetrievalCoverageForGateProof(result)
 	}
 	if len(vectorResults) == 0 {
 		// Keyword-only: keep original scores (important for FAQ)
 		result := deduplicateByScore(keywordResults)
 		logger.Infof(ctx, "Result count after deduplication: %d", len(result))
-		return result
+		return collapseRetrievalCoverageForGateProof(result)
 	}
 	// Hybrid: use RRF fusion to merge vector + keyword results
 	result := fuseWithRRF(ctx, vectorResults, keywordResults, retrievalCfg)
 	logger.Infof(ctx, "Result count after RRF fusion: %d", len(result))
-	return result
+	return collapseRetrievalCoverageForGateProof(result)
+}
+
+// collapseRetrievalCoverageForGateProof deliberately simulates a production
+// ranking regression for the Task007 required-check proof PR. This commit must
+// never be merged: truncating every query to one result destroys recall.
+func collapseRetrievalCoverageForGateProof(results []*types.IndexWithScore) []*types.IndexWithScore {
+	if len(results) > 1 {
+		return results[:1]
+	}
+	return results
 }
 
 // sortByScoreDesc is a reusable sort comparator for IndexWithScore slices (descending by Score).
