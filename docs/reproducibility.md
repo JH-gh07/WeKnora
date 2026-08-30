@@ -74,6 +74,18 @@ a silent edit.
 | `ERROR` | 4 | infrastructure or execution failure |
 | (usage) | 1 | flag/usage error, never reported as success |
 
+The public entry never exits `1` on an infrastructure failure. Missing tools
+(`git`/`go`/`python3`/`jq`/…), a failed `go build`, a failed
+`validate-ranking-seam`/`run`, or a failed Python aggregation are all mapped to
+`ERROR/4` with a reason-coded message (`reason=missing_tool|build_failed|…`).
+Only the `compare` step's own exit (0/2/3/4) is propagated as the final code; a
+`compare` exit outside that set is also treated as `ERROR/4`.
+
+The entry is locale-safe: it selects a real UTF-8 locale that exists on the
+host, forces `PYTHONUTF8=1`/`PYTHONIOENCODING=utf-8`, and runs the stdlib-only
+aggregation with `python3 -S` so a site-packages `.pth` file containing a
+non-ASCII path can never crash the run (see §9 non-UTF-8 locale test).
+
 ## 6. Output artifact set
 
 `reproduction-output/<run-id>/` (or `OUTPUT_DIR`) contains:
@@ -126,7 +138,9 @@ The following are exercised against the entry (see the G7 verification plan):
 - existing non-empty output dir → fail closed
 - `.env` with a fake provider key → behavior/output unchanged, key not read or printed
 - empty/one-time `HOME` and `env -i` → still succeeds
-- non-default `LC_ALL`/`LANG` → Chinese paths and JSON output uncorrupted
+- non-default `LC_ALL`/`LANG` (e.g. `LC_ALL=C`, `C.UTF-8`, `POSIX`) with a non-ASCII
+  site-packages `.pth` path → run still succeeds, Chinese paths and JSON output
+  uncorrupted (Python site import must not crash with `UnicodeDecodeError`)
 - repository path with spaces / Chinese characters → succeeds
 - no network → succeeds
 - absent adjacent `status/` directory → succeeds
