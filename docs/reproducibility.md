@@ -1,0 +1,133 @@
+# Reproducibility & Benchmark Contract (Official Core)
+
+> Applies to Release Candidate `0.8.0-rc1` and later. This document is the
+> authoritative reference for the deterministic quality reproduction entry
+> `make reproduce-evaluation`. It is intentionally minimal (see the Task009/G7
+> plan for the full governance context) and does not duplicate constants that
+> already live as the single source of truth in `tests/evaluation/**`.
+
+## 1. What this is
+
+`make reproduce-evaluation` reproduces the deterministic retrieval quality
+regression (Task007/G5 gate) from a fresh clone, with **zero network, provider,
+secret, database, Docker, or UI** during the execution phase. It is not a second
+retrieval implementation: it reuses the single computation authority
+`cmd/evaluation-regression` (subcommands `run`, `compare`,
+`validate-ranking-seam`) and the versioned inputs under `tests/evaluation/`.
+
+## 2. Two reproduction contracts
+
+| Contract | Scope | Status | Blocking? |
+| --- | --- | --- | --- |
+| **Official Core** | offline deterministic retrieval metrics vs immutable baseline | mandatory | yes (P0) |
+| **Provider Experiment** | live model/embedding boundary observation | advisory, opt-in | no |
+
+The Provider Experiment is a **separate opt-in entry**, is not triggered by the
+default command, and requires an explicit credential/budget decision. With no
+credential configured it must report `SKIP_WITH_REASON` / `INCONCLUSIVE` and
+never contaminate the Official Core conclusion. This repository does not ship a
+default provider path in `make reproduce-evaluation`.
+
+## 3. One command
+
+```bash
+make reproduce-evaluation
+# or, to choose the output directory:
+OUTPUT_DIR=/tmp/my-run make reproduce-evaluation
+```
+
+The command:
+
+1. builds `cmd/evaluation-regression` into a disposable temp directory (no root
+   binary residue);
+2. validates the production ranking seam (SUT)
+   `internal/application/service/knowledgebase_search_fusion.go` and records its
+   `ranking_artifact_hash`;
+3. runs the deterministic fixture and writes a candidate result;
+4. compares the candidate against the protected baseline `B001` and writes the
+   decision;
+5. emits a stable machine-readable `summary.json` plus a human-readable
+   `summary.md`.
+
+## 4. Frozen inputs (single source of truth)
+
+| Input | Path |
+| --- | --- |
+| fixture | `tests/evaluation/fixtures/retrieval_core_v1.json` |
+| comparison policy | `tests/evaluation/policies/quality_core_v1.json` |
+| evaluator contract | `tests/evaluation/evaluator_contract.json` |
+| evaluator artifact manifest | `tests/evaluation/evaluator_artifact_manifest.json` |
+| ranking seam (SUT) | `internal/application/service/knowledgebase_search_fusion.go` |
+| baseline | `tests/evaluation/baselines/baseline_B001_manifest.json` |
+
+Do not copy expected metric constants into this document: the baseline manifest
+is authoritative. Any change to these assets is a Measurement Change Review, not
+a silent edit.
+
+## 5. Exit / decision contract
+
+| Decision | Exit code | Meaning |
+| --- | --- | --- |
+| `PASS` | 0 | no metric regression vs baseline |
+| `BLOCK` | 2 | confirmed quality regression |
+| `NOT_COMPARABLE` | 3 | preflight / identity mismatch; comparison refused |
+| `ERROR` | 4 | infrastructure or execution failure |
+| (usage) | 1 | flag/usage error, never reported as success |
+
+## 6. Output artifact set
+
+`reproduction-output/<run-id>/` (or `OUTPUT_DIR`) contains:
+
+```text
+summary.json            machine-readable summary + decision
+summary.md              human-readable summary
+environment_lock.json   os/arch/go/locale/db/container provenance
+source_identity.json    commit/tree + fixture/policy/evaluator/ranking identity
+input_manifest.json     sha256 of the exact inputs consumed
+candidate_result.json   deterministic runner result
+comparison_decision.json  comparator decision
+ranking_artifact.txt    ranking seam identity (validate-ranking-seam)
+artifact_manifest.tsv   per-file sha256 + __ROOT__ digest (self-excluded)
+commands.log            command trace
+stderr.log              stderr capture
+```
+
+`artifact_manifest.tsv` root digest is computed as SHA-256 over the sorted
+concatenation `"FILE <path>\n<bytes>"` of every other file in the run dir.
+
+## 7. Result comparison rules
+
+| Result type | P0 rule | Reporting |
+| --- | --- | --- |
+| deterministic retrieval metrics | numeric `epsilon` match vs baseline (from policy) | metric + delta + epsilon |
+| canonical machine artifact | exact byte/hash match | expected vs actual hash |
+| stochastic generation | out of Official Core scope | tolerance or INCONCLUSIVE |
+| latency / cost | advisory only | workload/sample/p50-p95/MAD + environment |
+| provider cache | advisory | provider/model/revision/time window |
+
+## 8. Network independence
+
+Dependency download (Go modules) happens during **bootstrap** only. The
+execution phase (`run` / `compare` / `validate-ranking-seam`) performs no
+network I/O by executable dependency boundary; the runner additionally rejects
+the SUT seam if it contains network/provider/db/subprocess/file-write/init
+content. On platforms where a hard egress sandbox cannot be asserted, this is
+recorded as "network independence proven by executable dependency boundary +
+clean environment", not as an egress-sandbox claim.
+
+## 9. Negative contract tests
+
+The following are exercised against the entry (see the G7 verification plan):
+
+- missing fixture → `ERROR/4`
+- fixture hash mismatch → `NOT_COMPARABLE/3`
+- unknown policy/version → `NOT_COMPARABLE/3`
+- controlled deterministic quality regression → `BLOCK/2`
+- existing non-empty output dir → fail closed
+- `.env` with a fake provider key → behavior/output unchanged, key not read or printed
+- empty/one-time `HOME` and `env -i` → still succeeds
+- non-default `LC_ALL`/`LANG` → Chinese paths and JSON output uncorrupted
+- repository path with spaces / Chinese characters → succeeds
+- no network → succeeds
+- absent adjacent `status/` directory → succeeds
+- post-run tracked tree has zero diff and no undeclared residue

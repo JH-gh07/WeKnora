@@ -294,6 +294,19 @@ make dev-frontend
 **详细文档：** [开发环境快速入门](./docs/开发指南.md)
 
 
+### 🔬 评估复现（Official Core）
+
+一条离线命令复现确定性检索质量回归（Task007/G5 门禁）——无需 Provider、数据库、Docker 或密钥：
+
+```bash
+make reproduce-evaluation
+```
+
+该命令从当前 commit 重新构建 `cmd/evaluation-regression`，并用 `tests/evaluation/` 下版本化的 fixture / policy / evaluator 契约，将指标与不可变基线 `B001` 比较。退出码遵循四态契约：`PASS=0`、`BLOCK=2`、`NOT_COMPARABLE=3`、`ERROR=4`。输出位于 `reproduction-output/<run-id>/`（或设置 `OUTPUT_DIR=<新目录>`）。
+
+**详情：** [可复现性与基准契约](./docs/reproducibility.md)
+
+
 ## 🤝 贡献指南
 
 欢迎通过 [Issue](https://github.com/Tencent/WeKnora/issues) 反馈问题或提交 Pull Request。

@@ -311,6 +311,19 @@ make dev-frontend
 **Detailed Documentation:** [Development Environment Quick Start](./docs/开发指南.md)
 
 
+### 🔬 Evaluation Reproduction (Official Core)
+
+Reproduce the deterministic retrieval quality regression (Task007/G5 gate) in one offline command — no provider, no database, no Docker, no secrets:
+
+```bash
+make reproduce-evaluation
+```
+
+This rebuilds the `cmd/evaluation-regression` runner from the current commit and compares its metrics against the immutable baseline `B001` using the versioned fixture / policy / evaluator contract under `tests/evaluation/`. Exit codes follow the four-state contract: `PASS=0`, `BLOCK=2`, `NOT_COMPARABLE=3`, `ERROR=4`. Output lands in `reproduction-output/<run-id>/` (or set `OUTPUT_DIR=<new dir>`).
+
+**Details:** [Reproducibility & Benchmark Contract](./docs/reproducibility.md)
+
+
 ## 🤝 Contributing
 
 Welcome to submit [Issues](https://github.com/Tencent/WeKnora/issues) or Pull Requests.

@@ -1,4 +1,4 @@
-.PHONY: help build run test clean docker-build-app docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images show-platform dev-start dev-stop dev-restart dev-logs dev-status dev-app dev-frontend docs install-swagger build-lite run-lite package-lite anydoc-lib build-anydoc
+.PHONY: help build run test reproduce-evaluation clean docker-build-app docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images show-platform dev-start dev-stop dev-restart dev-logs dev-status dev-app dev-frontend docs install-swagger build-lite run-lite package-lite anydoc-lib build-anydoc
 
 # Show help
 help:
@@ -106,6 +106,12 @@ run: build
 # Run tests
 test:
 	go test -v ./...
+
+# Official Core deterministic quality reproduction (Task009 / G7, offline).
+# Reuses cmd/evaluation-regression + versioned tests/evaluation/** inputs;
+# no network/provider/secret/DB/Docker during execution. OUTPUT_DIR=<dir> honored.
+reproduce-evaluation:
+	bash scripts/reproduce-evaluation.sh
 
 # Clean build artifacts
 clean:
