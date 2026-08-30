@@ -11,8 +11,8 @@
 # modes: preflight | reuse-audit | control-facts | observation | cache |
 #        config | security-lifecycle | governance | static | all-safe
 #
-# Identity context: WeKnora HEAD 93753114319f18d40e5698883b853a3816f22ddc
-# (archive G2B-G5) plus Task008 allowed-path writes only.
+# Identity context: original Failure experiments at 93753114; final
+# compatibility check against post-G5 closure base 7035f24b.
 set -uo pipefail
 
 MODE="${1:-all-safe}"
@@ -31,7 +31,7 @@ export LC_ALL="en_US.UTF-8"
 export LANG="en_US.UTF-8"
 export PYTHONUTF8=1
 TS="$(date +%Y%m%d_%H%M%S)"
-RUN_DIR="/tmp/task008-verify/$TS"
+RUN_DIR="${TASK008_RUN_DIR:-/tmp/task008-verify/$TS}"
 mkdir -p "$RUN_DIR"
 SUMMARY="$RUN_DIR/summary.tsv"
 : > "$SUMMARY"
@@ -108,21 +108,20 @@ m_preflight() {
   done
 
   local head; head=$(cd "$WKNORA_ROOT" && git rev-parse HEAD)
-  # Identity: frozen implementation base 93753114 must exist; production tree must
-  # equal the frozen base (overlay commits may only add *_test.go and
-  # scripts/tmpCheck/task008/**).
+  # Identity: the post-Task007 closure base must exist; subsequent overlays may
+  # only touch Task008 verifier/tests and the requirement status ledger.
   local prod_diff
-  if (cd "$WKNORA_ROOT" && git cat-file -e 93753114319f18d40e5698883b853a3816f22ddc 2>/dev/null); then
-    prod_diff=$(cd "$WKNORA_ROOT" && git diff 93753114319f18d40e5698883b853a3816f22ddc..HEAD -- . ':(exclude)*_test.go' ':(exclude)scripts/tmpCheck/task008' | head -1)
+  if (cd "$WKNORA_ROOT" && git cat-file -e 7035f24b42a9d47a3f935d624c269fbb863ed126 2>/dev/null); then
+    prod_diff=$(cd "$WKNORA_ROOT" && git diff 7035f24b42a9d47a3f935d624c269fbb863ed126..HEAD -- . ':(exclude)*_test.go' ':(exclude)scripts/tmpCheck/task008' ':(exclude)docs/requirement_matrix.md' | head -1)
     if [ -z "$prod_diff" ]; then
-      log p0.03_weknora_identity PASS "$head (production tree = frozen base 93753114)" 0 "$EVID/source_identity.md"
+      log p0.03_weknora_identity PASS "$head (production tree = post-G5 base 7035f24b)" 0 "$EVID/source_identity.md"
       PASS=$((PASS+1))
     else
       log p0.03_weknora_identity FAIL "HEAD=$head prod_diff non-empty" 0 "$EVID/source_identity.md"
       FAIL=$((FAIL+1))
     fi
   else
-    log p0.03_weknora_identity FAIL "frozen base 93753114 not present in repo" 0 "$EVID/source_identity.md"
+    log p0.03_weknora_identity FAIL "post-G5 base 7035f24b not present in repo" 0 "$EVID/source_identity.md"
     FAIL=$((FAIL+1))
   fi
 
@@ -294,11 +293,12 @@ PYEOF
     log r3_reuse_paths FAIL "missing upstream evidence path(s)" 0 "$mat"; FAIL=$((FAIL+1))
   fi
 
-  # BLOCKED governance rows present with REUSE_AFTER_G5_GO
-  if grep -q "^G1A.*REUSE_AFTER_G5_GO.*BLOCKED" "$mat" && grep -q "^G1B.*REUSE_AFTER_G5_GO.*BLOCKED" "$mat"; then
-    log r4_step7_blocked PASS "G1A/G1B REUSE_AFTER_G5_GO + BLOCKED" 0 "$mat"; PASS=$((PASS+1))
+  # G5 has closed: Step 7 must consume permanent governance evidence instead
+  # of preserving the former calendar-gate placeholder.
+  if grep -q "^G1A.*REUSE_VERIFIED.*PASS" "$mat" && grep -q "^G1B.*REUSE_VERIFIED.*PASS" "$mat"; then
+    log r4_step7_verified PASS "G1A/G1B REUSE_VERIFIED + PASS" 0 "$mat"; PASS=$((PASS+1))
   else
-    log r4_step7_blocked FAIL "step7 rows not blocked" 0 "$mat"; FAIL=$((FAIL+1))
+    log r4_step7_verified FAIL "Step 7 governance rows are not closed" 0 "$mat"; FAIL=$((FAIL+1))
   fi
 
   if python3 -c "import yaml,sys; yaml.safe_load(open('$EVID/failure_authority_contract.yaml')); print('ok')" > "$RUN_DIR/r5_yaml.log" 2>&1; then
@@ -402,6 +402,9 @@ m_security_lifecycle() {
 
 m_governance() {
   local t7="$STATUS_ROOT/evidence/task007/verification_summary.tsv"
+  local g7="$STATUS_ROOT/evidence/task007/github_governance_after.json"
+  local d7="$STATUS_ROOT/evidence/task007/workflow_artifact_digests.txt"
+  local cr7="$STATUS_ROOT/todo/change_review_task007_midterm_gate_waiver.md"
   if [ -f "$t7" ]; then
     local p f s
     p=$(grep -c '	PASS	' "$t7"); f=$(grep -c '	FAIL	' "$t7"); s=$(grep -c '	SKIP	' "$t7")
@@ -413,12 +416,38 @@ m_governance() {
   else
     log v1_task007_local FAIL "task007 verification_summary.tsv missing" 0 "$t7"; FAIL=$((FAIL+1))
   fi
-  if grep -q '^G1A.*BLOCKED' "$EVID/governance_failure_matrix.tsv" && grep -q '^G1B.*BLOCKED' "$EVID/governance_failure_matrix.tsv"; then
-    log v2_step7_blocked PASS "governance rows BLOCKED (G5 GO gate)" 0 "$EVID/governance_failure_matrix.tsv"; PASS=$((PASS+1))
+  if grep -q '^G1A.*REUSE_VERIFIED.*PASS' "$EVID/governance_failure_matrix.tsv" && grep -q '^G1B.*REUSE_VERIFIED.*PASS' "$EVID/governance_failure_matrix.tsv"; then
+    log v2_step7_matrix PASS "governance rows closed from frozen Task007 evidence" 0 "$EVID/governance_failure_matrix.tsv"; PASS=$((PASS+1))
   else
-    log v2_step7_blocked FAIL "governance rows not blocked" 0 "$EVID/governance_failure_matrix.tsv"; FAIL=$((FAIL+1))
+    log v2_step7_matrix FAIL "governance rows are not closed" 0 "$EVID/governance_failure_matrix.tsv"; FAIL=$((FAIL+1))
   fi
-  skip v3_github_required_check "GitHub-external fact; BLOCKED_EXTERNAL_CONFIGURATION (no Owner auth, no published workflow)" "$EVID/github_required_check_audit.md"
+  if jq -e '
+      .repository == "JH-gh07/WeKnora" and
+      .repository_scope == "owner_authorized_validation_fork" and
+      .status == "EXTERNAL_GOVERNANCE_VERIFIED" and
+      .ruleset.id == 21725115 and
+      .ruleset.enforcement == "active" and
+      .ruleset.strict_required_status_checks_policy == true and
+      .ruleset.required_context == "evaluation-regression / quality" and
+      .workflow.active_on_repository == true and
+      .workflow.trigger == "pull_request" and
+      .positive_control.decision == "PASS" and
+      .positive_control.merged == true and
+      .negative_control.decision == "BLOCK" and
+      .negative_control.process_exit == 2 and
+      .negative_control.merge_state == "BLOCKED" and
+      .negative_control.merged == false and
+      .audit.authenticated == true and
+      .audit.audit_exit == 0
+    ' "$g7" >/dev/null &&
+    grep -q '^bootstrap_not_comparable run=33162642581 .*digest=sha256:' "$d7" &&
+    grep -q '^healthy_pass run=33163214435 .*digest=sha256:' "$d7" &&
+    grep -q '^deliberate_block run=33163682389 .*digest=sha256:' "$d7" &&
+    grep -q '状态：ACCEPTED' "$cr7"; then
+    log v3_github_required_check PASS "fork Ruleset + PASS/BLOCK/NOT_COMPARABLE artifacts + Owner gate decision verified" 0 "$EVID/github_required_check_audit.md"; PASS=$((PASS+1))
+  else
+    log v3_github_required_check FAIL "Task007 external governance evidence or Owner gate decision mismatch" 0 "$EVID/github_required_check_audit.md"; FAIL=$((FAIL+1))
+  fi
 }
 
 m_static() {
@@ -447,7 +476,7 @@ m_static() {
   # diff check: every changed/untracked path must be inside the allowed write
   # boundary (task008 evidence/tests/scripts + pre-existing status/view notes)
   local allowed rogue
-  rogue=$(cd "$WKNORA_ROOT" && git status --porcelain=v1 -uall | sed 's/^...//' | sed 's/^"//; s/"$//' | grep -vE '^(status/view/|internal/application/service/evaluation_failure_test.go$|internal/application/service/model_delete_failure_test.go$|internal/models/chat/metering_failure_combined_test.go$|internal/models/embedding/metering_failure_combined_test.go$|internal/models/rerank/metering_failure_combined_test.go$|scripts/tmpCheck/task008/)')
+  rogue=$(cd "$WKNORA_ROOT" && git status --porcelain=v1 -uall | sed 's/^...//' | sed 's/^"//; s/"$//' | grep -vE '^(status/view/|docs/requirement_matrix.md$|internal/application/service/evaluation_failure_test.go$|internal/application/service/model_delete_failure_test.go$|internal/models/chat/metering_failure_combined_test.go$|internal/models/embedding/metering_failure_combined_test.go$|internal/models/rerank/metering_failure_combined_test.go$|scripts/tmpCheck/task008/)')
   if [ -z "$rogue" ]; then
     log t4_diff_boundary PASS "working tree writes inside allowed boundary" 0 "$EVID/diff_check.log"; PASS=$((PASS+1))
   else
@@ -509,7 +538,7 @@ badskip=0
 while IFS=$'\t' read -r id status detail dur ev; do
   [ "$status" = "SKIP" ] || continue
   case "$id" in
-    c4_pg_runtime|k3_pg_parity|v3_github_required_check|t5_residue) : ;;  # allowed: docker/external facts with archived evidence
+    c4_pg_runtime|k3_pg_parity|t5_residue) : ;;  # allowed: docker/residue facts with archived evidence
     *) badskip=1; echo "P0 SKIP without allowed reason: $id ($detail)" >&2 ;;
   esac
 done < "$SUMMARY"
