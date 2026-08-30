@@ -10,20 +10,70 @@
 #   * no network / provider / secret / DB / Docker / UI during execution
 #   * does not read .env, provider keys, user HOME config, or git global alias
 #   * non-interactive; exit code mirrors the four-state contract:
-#       PASS=0  BLOCK=2  NOT_COMPARABLE=3  ERROR=4  (1 = usage)
+#       PASS=0  BLOCK=2  NOT_COMPARABLE=3  ERROR=4  (1 = usage, never emitted here)
+#   * any infrastructure failure (missing tool, build, run, aggregation) maps to
+#     ERROR/4 with a reason-coded message — never a bare exit 1
 #   * OUTPUT_DIR=<new dir> is honored; an existing non-empty OUTPUT_DIR fails closed
 #   * default output lands in reproduction-output/<run-id> (never overwrites)
+#   * locale-safe: a non-UTF-8 locale must not crash the runner (see setup_utf8)
 #
 # Usage:
 #   make reproduce-evaluation
 #   bash scripts/reproduce-evaluation.sh
 #   OUTPUT_DIR=/tmp/my-run bash scripts/reproduce-evaluation.sh
-set -euo pipefail
+set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-# ---- versioned default inputs (frozen; never read from env/profile) ----
+# ---- helpers -------------------------------------------------------------
+fail_infra() {
+  # Map an infrastructure failure to the four-state contract ERROR (exit 4).
+  local reason="$1"; shift
+  echo "ERROR(reason=${reason}): $*" >&2
+  exit 4
+}
+
+require_tool() {
+  command -v "$1" >/dev/null 2>&1 || fail_infra "missing_tool" "required tool not on PATH: $1"
+}
+
+# ---- locale + Python encoding (must never break on non-ASCII paths) ------
+# A non-UTF-8 locale (or a macOS-unknown name such as C.UTF-8) makes CPython's
+# site import crash with UnicodeDecodeError when any site-packages .pth file
+# contains a non-ASCII path. Fix:
+#   (1) prefer a UTF-8 locale that actually exists on this host;
+#   (2) force Python into UTF-8 mode for filesystem + stdout/stderr;
+#   (3) run the aggregation with `python3 -S` so site-packages (.pth) is never
+#       imported at all — the aggregation uses only the standard library.
+setup_utf8() {
+  if command -v locale >/dev/null 2>&1; then
+    local cand
+    for cand in en_US.UTF-8 zh_CN.UTF-8 C.UTF-8 C.utf8 en_US.utf8 zh_CN.utf8; do
+      if locale -a 2>/dev/null | grep -qx "$cand"; then
+        export LC_ALL="$cand"
+        export LANG="$cand"
+        break
+      fi
+    done
+  fi
+  export PYTHONUTF8=1
+  export PYTHONIOENCODING=utf-8
+}
+setup_utf8
+
+# ---- required standard tools (missing => ERROR/4, never a bare usage exit) --
+require_tool git
+require_tool go
+require_tool python3
+require_tool jq
+require_tool mktemp
+require_tool sed
+require_tool date
+require_tool uname
+require_tool tr
+
+# ---- versioned default inputs (frozen; never read from env/profile) --------
 FIXTURE="tests/evaluation/fixtures/retrieval_core_v1.json"
 POLICY="tests/evaluation/policies/quality_core_v1.json"
 CONTRACT="tests/evaluation/evaluator_contract.json"
@@ -33,24 +83,21 @@ BASELINE="tests/evaluation/baselines/baseline_B001_manifest.json"
 
 for f in "$FIXTURE" "$POLICY" "$CONTRACT" "$MANIFEST" "$RANKING_FILE" "$BASELINE"; do
   if [[ ! -f "$f" ]]; then
-    echo "ERROR(reason=missing_input): required input not found: $f" >&2
-    exit 4
+    fail_infra "missing_input" "required input not found: $f"
   fi
 done
 
-# ---- output directory (fail closed on existing non-empty dir) ----
+# ---- output directory (fail closed on existing non-empty dir) ---------------
 if [[ -n "${OUTPUT_DIR:-}" ]]; then
   OUT="$OUTPUT_DIR"
   if [[ -e "$OUT" ]] && [[ -n "$(ls -A "$OUT" 2>/dev/null)" ]]; then
-    echo "ERROR(reason=output_dir_not_empty): OUTPUT_DIR exists and is non-empty: $OUT" >&2
-    exit 4
+    fail_infra "output_dir_not_empty" "OUTPUT_DIR exists and is non-empty: $OUT"
   fi
 else
   RUN_ID="run-$(date -u +%Y%m%dT%H%M%SZ)"
   OUT="reproduction-output/$RUN_ID"
   if [[ -e "$OUT" ]]; then
-    echo "ERROR(reason=output_dir_exists): $OUT already exists" >&2
-    exit 4
+    fail_infra "output_dir_exists" "$OUT already exists"
   fi
 fi
 mkdir -p "$OUT"
@@ -72,60 +119,60 @@ OS_NAME="$(uname -s)"
 OS_ARCH="$(uname -m)"
 GO_VERSION="$(go version 2>/dev/null || echo NOT_AVAILABLE)"
 
-# ---- build the CLI into a disposable temp dir (no root binary residue) ----
+# ---- build the CLI into a disposable temp dir (no root binary residue) ------
 BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/weknora-eval.XXXXXX")"
 cleanup() { rm -rf "$BUILD_DIR"; }
 trap cleanup EXIT
 
 BIN="$BUILD_DIR/evaluation-regression"
-{
-  log_cmd "go build -o $BIN ./cmd/evaluation-regression/"
-  go build -o "$BIN" ./cmd/evaluation-regression/
-} 2>>"$STDERR_LOG"
 
-# ---- validate the production ranking seam (SUT) identity ----
-{
-  log_cmd "$BIN validate-ranking-seam --ranking-file $RANKING_FILE"
-  "$BIN" validate-ranking-seam --ranking-file "$RANKING_FILE" 2>>"$STDERR_LOG"
-} > "$OUT/ranking_artifact.txt"
+log_cmd "go build -o $BIN ./cmd/evaluation-regression/"
+go build -o "$BIN" ./cmd/evaluation-regression/ 2>>"$STDERR_LOG" \
+  || fail_infra "build_failed" "go build ./cmd/evaluation-regression/ failed (see $OUT/stderr.log)"
+
+# ---- validate the production ranking seam (SUT) identity ---------------------
+log_cmd "$BIN validate-ranking-seam --ranking-file $RANKING_FILE"
+"$BIN" validate-ranking-seam --ranking-file "$RANKING_FILE" > "$OUT/ranking_artifact.txt" 2>>"$STDERR_LOG" \
+  || fail_infra "validate_failed" "validate-ranking-seam failed (see $OUT/stderr.log)"
 RANKING_HASH="$(sed -n 's/^ranking_artifact_hash=//p' "$OUT/ranking_artifact.txt")"
+[[ -n "$RANKING_HASH" ]] || fail_infra "ranking_hash_missing" "validate-ranking-seam did not emit ranking_artifact_hash"
 
-# ---- deterministic run -> candidate result ----
-{
-  log_cmd "$BIN run --fixture $FIXTURE --policy $POLICY --contract $CONTRACT --manifest $MANIFEST --ranking-file $RANKING_FILE --out $OUT/candidate_result.json"
-  "$BIN" run \
-    --fixture      "$FIXTURE" \
-    --policy       "$POLICY" \
-    --contract     "$CONTRACT" \
-    --manifest     "$MANIFEST" \
-    --ranking-file "$RANKING_FILE" \
-    --out          "$OUT/candidate_result.json" 2>>"$STDERR_LOG"
-} > "$OUT/run_stdout.txt"
+# ---- deterministic run -> candidate result ------------------------------------
+log_cmd "$BIN run --fixture $FIXTURE --policy $POLICY --contract $CONTRACT --manifest $MANIFEST --ranking-file $RANKING_FILE --out $OUT/candidate_result.json"
+"$BIN" run \
+  --fixture      "$FIXTURE" \
+  --policy       "$POLICY" \
+  --contract     "$CONTRACT" \
+  --manifest     "$MANIFEST" \
+  --ranking-file "$RANKING_FILE" \
+  --out          "$OUT/candidate_result.json" > "$OUT/run_stdout.txt" 2>>"$STDERR_LOG" \
+  || fail_infra "run_failed" "evaluation run failed (see $OUT/stderr.log)"
 
-# ---- comparison against protected baseline (propagate decision exit) ----
+# ---- comparison against protected baseline (decision exit 0/2/3/4) ------------
 COMPARE_EXIT=0
-{
-  log_cmd "$BIN compare --baseline $BASELINE --candidate $OUT/candidate_result.json --policy $POLICY --out $OUT/comparison_decision.json"
-  set +e
-  "$BIN" compare \
-    --baseline  "$BASELINE" \
-    --candidate "$OUT/candidate_result.json" \
-    --policy    "$POLICY" \
-    --out       "$OUT/comparison_decision.json" 2>>"$STDERR_LOG"
-  COMPARE_EXIT=$?
-  set -e
-} > "$OUT/compare_stdout.txt"
+log_cmd "$BIN compare --baseline $BASELINE --candidate $OUT/candidate_result.json --policy $POLICY --out $OUT/comparison_decision.json"
+"$BIN" compare \
+  --baseline  "$BASELINE" \
+  --candidate "$OUT/candidate_result.json" \
+  --policy    "$POLICY" \
+  --out       "$OUT/comparison_decision.json" > "$OUT/compare_stdout.txt" 2>>"$STDERR_LOG"
+COMPARE_EXIT=$?
+case "$COMPARE_EXIT" in
+  0|2|3|4) : ;;
+  *) fail_infra "compare_infrastructure" "compare exited with $COMPARE_EXIT (expected 0/2/3/4)" ;;
+esac
 
 END_EPOCH="$(date +%s)"
 END_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 DURATION=$((END_EPOCH - START_EPOCH))
 
-# ---- aggregate provenance / summary / manifest (python3 is a standard tool) ----
+# ---- aggregate provenance / summary / manifest (stdlib-only python) -----------
 export OUT COMMIT TREE START_UTC END_UTC DURATION RANKING_HASH \
        FIXTURE POLICY CONTRACT MANIFEST RANKING_FILE BASELINE \
        OS_NAME OS_ARCH GO_VERSION COMPARE_EXIT
-python3 - "$OUT" <<'PYEOF'
-import json, os, sys, hashlib, subprocess
+
+if ! python3 -S - "$OUT" <<'PYEOF'
+import json, os, sys, hashlib
 
 out = sys.argv[1]
 def read_json(p):
@@ -264,8 +311,11 @@ lines.append(f"__ROOT__\t{h.hexdigest()}\t{len(rows)}")
 with open(os.path.join(out, "artifact_manifest.tsv"), "w") as fh:
     fh.write("\n".join(lines) + "\n")
 PYEOF
+then
+  fail_infra "aggregation_failed" "python3 aggregation failed (see $OUT/stderr.log)"
+fi
 
-# ---- human summary on stdout ----
+# ---- human summary on stdout ------------------------------------------------
 echo "===================================================================="
 echo "Official Core Reproduction — $(jq -r .decision "$OUT/comparison_decision.json" 2>/dev/null || echo '?')"
 echo "  output dir : $OUT"

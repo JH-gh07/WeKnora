@@ -60,3 +60,6 @@ miniprogram/project.private.config.json
 
 # Staging dir for the Docker sandbox self-check probe (removed after each run)
 .weknora-sandbox-check-*
+
+# Official Core reproduction output (deterministic run artifacts, never committed)
+reproduction-output/
