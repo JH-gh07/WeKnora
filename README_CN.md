@@ -296,13 +296,20 @@ make dev-frontend
 
 ### 🔬 评估复现（Official Core）
 
-一条离线命令复现确定性检索质量回归（Task007/G5 门禁）——无需 Provider、数据库、Docker 或密钥：
+通过一个公开命令复现确定性检索质量回归（Task007/G5 门禁）——无需 Provider、数据库、Docker 或密钥：
 
 ```bash
 make reproduce-evaluation
 ```
 
 该命令从当前 commit 重新构建 `cmd/evaluation-regression`，并用 `tests/evaluation/` 下版本化的 fixture / policy / evaluator 契约，将指标与不可变基线 `B001` 比较。退出码遵循四态契约：`PASS=0`、`BLOCK=2`、`NOT_COMPARABLE=3`、`ERROR=4`。输出位于 `reproduction-output/<run-id>/`（或设置 `OUTPUT_DIR=<新目录>`）。
+
+> **Bootstrap 边界：** 该命令包含 Go 构建。冷机首次运行时，若本地没有匹配
+> `go.mod` 的 Go 工具链和 `go.sum` 锁定的模块，构建阶段需要联网下载；也可以事先
+> 预暖对应工具链与 `GOMODCACHE`。依赖准备完成后，确定性执行阶段才是纯离线。
+> 当前不承诺“冷 clone、无依赖缓存且全程断网”仍可成功；该场景会以
+> `ERROR/4 (build_failed)` 退出，而不是被误报为质量退化。仓库目前没有 vendor
+> 全部 Go 依赖。
 
 **详情：** [可复现性与基准契约](./docs/reproducibility.md)
 

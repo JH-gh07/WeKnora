@@ -313,13 +313,22 @@ make dev-frontend
 
 ### 🔬 Evaluation Reproduction (Official Core)
 
-Reproduce the deterministic retrieval quality regression (Task007/G5 gate) in one offline command — no provider, no database, no Docker, no secrets:
+Reproduce the deterministic retrieval quality regression (Task007/G5 gate) with one public command — no provider, database, Docker, or secrets:
 
 ```bash
 make reproduce-evaluation
 ```
 
 This rebuilds the `cmd/evaluation-regression` runner from the current commit and compares its metrics against the immutable baseline `B001` using the versioned fixture / policy / evaluator contract under `tests/evaluation/`. Exit codes follow the four-state contract: `PASS=0`, `BLOCK=2`, `NOT_COMPARABLE=3`, `ERROR=4`. Output lands in `reproduction-output/<run-id>/` (or set `OUTPUT_DIR=<new dir>`).
+
+> **Bootstrap boundary:** the command includes a Go build. On a cold machine, that
+> build may need network access to download the Go toolchain declared by
+> `go.mod` and modules pinned by `go.sum`, unless the matching toolchain and
+> `GOMODCACHE` have already been pre-warmed. Once those dependencies are
+> available, the deterministic execution phase is offline. A cold clone with
+> both the network disabled and no dependency cache is not currently a
+> supported promise; it fails as `ERROR/4 (build_failed)`, not as a quality
+> regression. The repository does not currently vendor all Go dependencies.
 
 **Details:** [Reproducibility & Benchmark Contract](./docs/reproducibility.md)
 

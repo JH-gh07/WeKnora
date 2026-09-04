@@ -15,6 +15,13 @@ retrieval implementation: it reuses the single computation authority
 `cmd/evaluation-regression` (subcommands `run`, `compare`,
 `validate-ranking-seam`) and the versioned inputs under `tests/evaluation/`.
 
+> **Important — bootstrap is not the execution phase.** The public command also
+> builds that CLI. On a cold machine, Go may use the network to obtain the exact
+> toolchain selected by `go.mod` and modules pinned by `go.sum`. The build is
+> offline only when the matching toolchain and module cache are already present.
+> This release does not vendor the complete dependency graph and therefore does
+> not claim that a cold clone with an empty cache can build while disconnected.
+
 ## 2. Two reproduction contracts
 
 | Contract | Scope | Status | Blocking? |
@@ -38,8 +45,9 @@ OUTPUT_DIR=/tmp/my-run make reproduce-evaluation
 
 The command:
 
-1. builds `cmd/evaluation-regression` into a disposable temp directory (no root
-   binary residue);
+1. performs the bootstrap build of `cmd/evaluation-regression` into a disposable
+   temp directory (no root binary residue); this step may download the pinned Go
+   toolchain/modules on a cold machine;
 2. validates the production ranking seam (SUT)
    `internal/application/service/knowledgebase_search_fusion.go` and records its
    `ranking_artifact_hash`;
@@ -48,6 +56,34 @@ The command:
    decision;
 5. emits a stable machine-readable `summary.json` plus a human-readable
    `summary.md`.
+
+### 3.1 Bootstrap choices
+
+Choose one before testing the offline execution claim:
+
+1. allow network access for the first `make reproduce-evaluation` build; or
+2. pre-warm the matching Go toolchain and `GOMODCACHE` from the same commit; or
+3. use a prepared build image/cache whose identity is recorded in the
+   environment report.
+
+For example, this warms the exact command package without leaving a binary in
+the repository:
+
+```bash
+build_dir="$(mktemp -d)"
+go build -o "$build_dir/evaluation-regression" ./cmd/evaluation-regression/
+rm -rf "$build_dir"
+```
+
+After bootstrap, run the public command with network egress disabled and the
+same toolchain/module cache mounted read-only or otherwise preserved. A missing
+toolchain/module in that phase is an infrastructure error:
+
+```text
+ERROR/4 (build_failed)
+```
+
+It is not `BLOCK`, and it says nothing about retrieval quality.
 
 ## 4. Frozen inputs (single source of truth)
 
@@ -119,13 +155,30 @@ concatenation `"FILE <path>\n<bytes>"` of every other file in the run dir.
 
 ## 8. Network independence
 
-Dependency download (Go modules) happens during **bootstrap** only. The
-execution phase (`run` / `compare` / `validate-ranking-seam`) performs no
-network I/O by executable dependency boundary; the runner additionally rejects
-the SUT seam if it contains network/provider/db/subprocess/file-write/init
-content. On platforms where a hard egress sandbox cannot be asserted, this is
-recorded as "network independence proven by executable dependency boundary +
-clean environment", not as an egress-sandbox claim.
+The one-command entry contains two distinct phases:
+
+| Phase | Includes | Network contract |
+| --- | --- | --- |
+| Bootstrap | resolve/present Go toolchain and modules; `go build` the CLI | may require network on a cold machine; otherwise use a recorded pre-warmed cache |
+| Deterministic execution | `validate-ranking-seam`, `run`, `compare`, stdlib-only aggregation | no network/provider/secret/DB dependency |
+
+The execution phase performs no network I/O by executable dependency boundary;
+the runner additionally rejects the SUT seam if it contains
+network/provider/db/subprocess/file-write/init content. The authoritative E1
+environment also disables egress during this phase. On platforms where a hard
+egress sandbox cannot be asserted, the weaker evidence must be recorded as
+"network independence proven by executable dependency boundary + clean
+environment", not as an egress-sandbox claim.
+
+Consequently the supported statement is:
+
+> Fresh clone + one public command reproduces the result after dependency
+> bootstrap; the deterministic execution phase is offline.
+
+The unsupported statement is:
+
+> A completely cold machine with an empty dependency cache builds and executes
+> offline from the first byte.
 
 ## 9. Negative contract tests
 
