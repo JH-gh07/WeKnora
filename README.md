@@ -330,6 +330,17 @@ This rebuilds the `cmd/evaluation-regression` runner from the current commit and
 > supported promise; it fails as `ERROR/4 (build_failed)`, not as a quality
 > regression. The repository does not currently vendor all Go dependencies.
 
+> **Scheduled advisory lane (Task011/AC-R4):** a separate workflow
+> `.github/workflows/evaluation-regression-scheduled.yml` runs the same public
+> command on the default branch on weekdays (`17 2 * * 1-5` UTC, i.e. Beijing
+> 10:17) plus a no-input manual dispatch for dry-runs. It is **advisory** — it
+> does not block merges and is not registered as a required check — and its
+> four-state decision is preserved verbatim. It has `contents: read` permission
+> only and reads no provider secret. Note the distinction: the **PR required
+> check** blocks a regression in a pull request, the **scheduled advisory lane**
+> continuously surfaces drift on the default branch, and **Provider
+> experiments** (cost / prompt-cache trend) are separate future lanes.
+
 **Details:** [Reproducibility & Benchmark Contract](./docs/reproducibility.md)
 
 
