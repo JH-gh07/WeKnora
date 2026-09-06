@@ -1,24 +1,34 @@
 package handler
 
 import (
+	stderrors "errors"
 	"net/http"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 // EvaluationHandler handles evaluation related HTTP requests
 type EvaluationHandler struct {
-	evaluationService interfaces.EvaluationService // Service for evaluation operations
+	evaluationService interfaces.EvaluationService       // Service for evaluation operations
+	reportService     interfaces.EvaluationReportService // Service for run-level unified report
 }
 
 // NewEvaluationHandler creates a new EvaluationHandler instance
-func NewEvaluationHandler(evaluationService interfaces.EvaluationService) *EvaluationHandler {
-	return &EvaluationHandler{evaluationService: evaluationService}
+func NewEvaluationHandler(
+	evaluationService interfaces.EvaluationService,
+	reportService interfaces.EvaluationReportService,
+) *EvaluationHandler {
+	return &EvaluationHandler{
+		evaluationService: evaluationService,
+		reportService:     reportService,
+	}
 }
 
 // EvaluationRequest contains parameters for evaluation request
@@ -127,5 +137,50 @@ func (e *EvaluationHandler) GetEvaluationResult(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    result,
+	})
+}
+
+// GetEvaluationRunReport godoc
+// @Summary      获取评估运行统一报告
+// @Description  按稳定 run_id 获取单次评估的检索质量、答案质量、成本与耗时统一报告
+// @Tags         评估
+// @Accept       json
+// @Produce      json
+// @Param        run_id  path      string  true  "评估运行 ID（UUID）"
+// @Success      200     {object}  map[string]interface{}  "评估运行报告"
+// @Failure      400     {object}  errors.AppError          "run_id 非法"
+// @Failure      404     {object}  errors.AppError          "运行不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /evaluation/runs/{run_id}/report [get]
+func (e *EvaluationHandler) GetEvaluationRunReport(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	runID := c.Param("run_id")
+	if runID == "" {
+		c.Error(errors.NewBadRequestError("run_id is required"))
+		return
+	}
+	// run_id is always a UUID (allocated in EvaluationRun.BeforeCreate); a
+	// malformed value is a 400, a well-formed but unknown one is a 404.
+	if _, err := uuid.Parse(runID); err != nil {
+		c.Error(errors.NewBadRequestError("run_id must be a valid UUID"))
+		return
+	}
+
+	report, err := e.reportService.GetRunReport(ctx, runID)
+	if err != nil {
+		if stderrors.Is(err, repository.ErrEvaluationRunNotFound) {
+			c.Error(errors.NewNotFoundError("evaluation run not found"))
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError("evaluation run report unavailable"))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    report,
 	})
 }

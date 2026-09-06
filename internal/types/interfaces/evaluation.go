@@ -20,6 +20,15 @@ type EvaluationService interface {
 	ReconcileInterruptedRuns(ctx context.Context) (int, error)
 }
 
+// EvaluationReportService composes the run-level unified report (quality,
+// answer, cost, latency + supporting usage/cache/health) from existing durable
+// facts keyed by the stable run_id. It creates no new fact tables and never
+// recomputes metrics or costs.
+type EvaluationReportService interface {
+	// GetRunReport returns the versioned report for a tenant-scoped run_id.
+	GetRunReport(ctx context.Context, runID string) (*types.EvaluationRunReport, error)
+}
+
 // Metrics defines interface for computing evaluation metrics
 type Metrics interface {
 	// Compute calculates metric score based on input data
