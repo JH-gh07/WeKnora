@@ -322,3 +322,67 @@ func TestModelCallHistoricalPricingIdentityIsImmutable(t *testing.T) {
 		t.Fatalf("pricing identity drifted: %+v", got)
 	}
 }
+
+func int64Ptr(v int64) *int64 { return &v }
+
+func TestModelCallPricingSnapshotRoundTrip(t *testing.T) {
+	db := newModelCallTestDB(t)
+	repo := NewModelCallRepository(db)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	priced := &types.ModelCall{
+		ID: "priced", TenantID: 1, ModelName: "Qwen/Qwen3-14B", Provider: "siliconflow",
+		Operation: types.ModelOperationChat, Success: true, UsageFinality: types.UsageFinalityReported,
+		InputTokens: intPtr(100), OutputTokens: intPtr(50), CacheStatus: types.PromptCacheStatusUnreported,
+		PricingStatus: types.PricingStatusPriced, PricingRuleID: "r1", PricingCatalogHash: "h1",
+		PricingUnit: "per_1m_tokens", InputUnitPriceNanos: int64Ptr(500_000_000), OutputUnitPriceNanos: int64Ptr(2_000_000_000),
+		EstimatedCostNanos: int64Ptr(150_000), EstimatedCost: floatPtr(0.00015), Currency: "CNY",
+		PricingVersion: "2026-09-06.1", PricingSource: "https://siliconflow.cn/pricing", PricingEffectiveAt: &now,
+		AttemptObservability: types.AttemptObservabilityUnobservable, CreatedAt: now,
+	}
+	if err := repo.CreateModelCall(ctx, priced); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.GetModelCall(ctx, 1, "priced")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PricingStatus != types.PricingStatusPriced || got.PricingRuleID != "r1" || got.PricingCatalogHash != "h1" || got.PricingUnit != "per_1m_tokens" {
+		t.Fatalf("pricing snapshot round trip: %+v", got)
+	}
+	if got.EstimatedCostNanos == nil || *got.EstimatedCostNanos != 150_000 {
+		t.Fatalf("nanos round trip: %+v", got.EstimatedCostNanos)
+	}
+	if got.InputUnitPriceNanos == nil || *got.InputUnitPriceNanos != 500_000_000 || got.OutputUnitPriceNanos == nil || *got.OutputUnitPriceNanos != 2_000_000_000 {
+		t.Fatalf("unit price round trip: %+v", got)
+	}
+
+	unknown := &types.ModelCall{
+		ID: "unknown", TenantID: 1, ModelName: "other", Provider: "x", Operation: types.ModelOperationChat,
+		Success: true, UsageFinality: types.UsageFinalityUnavailable,
+		PricingStatus: types.PricingStatusUnknown, PricingReason: types.PricingReasonUsageUnavailable,
+		AttemptObservability: types.AttemptObservabilityUnobservable, CreatedAt: now.Add(time.Second),
+	}
+	if err := repo.CreateModelCall(ctx, unknown); err != nil {
+		t.Fatal(err)
+	}
+	gotU, err := repo.GetModelCall(ctx, 1, "unknown")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotU.EstimatedCost != nil || gotU.EstimatedCostNanos != nil || gotU.Currency != "" || gotU.InputUnitPriceNanos != nil {
+		t.Fatalf("unknown row must stay NULL: %+v", gotU)
+	}
+
+	from, to := now.Add(-time.Minute), now.Add(time.Minute)
+	agg, err := repo.AggregateModelCalls(ctx, types.ModelCallFilter{TenantID: 1, From: &from, To: &to})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agg.PricedCallCount != 1 {
+		t.Fatalf("priced_call_count: %+v", agg)
+	}
+	if agg.PricingUnknownReasonCounts["USAGE_UNAVAILABLE"] != 1 {
+		t.Fatalf("unknown reason counts: %+v", agg.PricingUnknownReasonCounts)
+	}
+}
