@@ -1,0 +1,10 @@
+ALTER TABLE model_calls DROP COLUMN pricing_status;
+ALTER TABLE model_calls DROP COLUMN pricing_reason;
+ALTER TABLE model_calls DROP COLUMN pricing_rule_id;
+ALTER TABLE model_calls DROP COLUMN pricing_catalog_hash;
+ALTER TABLE model_calls DROP COLUMN pricing_unit;
+ALTER TABLE model_calls DROP COLUMN input_unit_price_nanos_per_million;
+ALTER TABLE model_calls DROP COLUMN output_unit_price_nanos_per_million;
+ALTER TABLE model_calls DROP COLUMN cache_read_unit_price_nanos_per_million;
+ALTER TABLE model_calls DROP COLUMN cache_write_unit_price_nanos_per_million;
+ALTER TABLE model_calls DROP COLUMN estimated_cost_nanos;

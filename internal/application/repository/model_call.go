@@ -146,8 +146,8 @@ func (r *modelCallRepository) GetModelCall(ctx context.Context, tenantID uint64,
 	return &call, err
 }
 
-func (r *modelCallRepository) AggregateModelCalls(ctx context.Context, filter types.ModelCallFilter) (*types.ModelUsageAggregate, error) {
-	q := r.db.WithContext(ctx).Model(&types.ModelCall{}).Where("tenant_id = ?", filter.TenantID)
+func (r *modelCallRepository) applyModelCallFilter(db *gorm.DB, filter types.ModelCallFilter) *gorm.DB {
+	q := db.Model(&types.ModelCall{}).Where("tenant_id = ?", filter.TenantID)
 	if filter.RunID != nil {
 		q = q.Where("run_id = ?", *filter.RunID)
 	}
@@ -166,6 +166,11 @@ func (r *modelCallRepository) AggregateModelCalls(ctx context.Context, filter ty
 	if filter.To != nil {
 		q = q.Where("created_at < ?", *filter.To)
 	}
+	return q
+}
+
+func (r *modelCallRepository) AggregateModelCalls(ctx context.Context, filter types.ModelCallFilter) (*types.ModelUsageAggregate, error) {
+	q := r.applyModelCallFilter(r.db.WithContext(ctx), filter)
 	var row struct {
 		LogicalCallCount                                                                                        int64
 		SuccessCount                                                                                            int64
@@ -175,6 +180,7 @@ func (r *modelCallRepository) AggregateModelCalls(ctx context.Context, filter ty
 		Currency                                                                                                sql.NullString
 		KnownCostCurrencyCount, KnownCostMissingCurrencyCount                                                   int64
 		UnknownCostCallCount                                                                                    int64
+		PricedCallCount                                                                                         int64
 		CacheEligibleCount, CacheReportedCount, CacheUnsupportedCount                                           int64
 	}
 	// SUM remains NULL when every value is unknown. This is deliberate: the
@@ -191,6 +197,7 @@ func (r *modelCallRepository) AggregateModelCalls(ctx context.Context, filter ty
 		COUNT(DISTINCT CASE WHEN estimated_cost IS NOT NULL AND currency <> '' THEN currency END) AS known_cost_currency_count,
 		SUM(CASE WHEN estimated_cost IS NOT NULL AND currency = '' THEN 1 ELSE 0 END) AS known_cost_missing_currency_count,
 		SUM(CASE WHEN estimated_cost IS NULL THEN 1 ELSE 0 END) AS unknown_cost_call_count,
+		SUM(CASE WHEN pricing_status = 'PRICED' THEN 1 ELSE 0 END) AS priced_call_count,
 		SUM(CASE WHEN cache_status <> 'unsupported' THEN 1 ELSE 0 END) AS cache_eligible_count,
 		SUM(CASE WHEN cache_status IN ('hit','miss') THEN 1 ELSE 0 END) AS cache_reported_count,
 		SUM(CASE WHEN cache_status = 'unsupported' THEN 1 ELSE 0 END) AS cache_unsupported_count`).Scan(&row).Error
@@ -198,7 +205,7 @@ func (r *modelCallRepository) AggregateModelCalls(ctx context.Context, filter ty
 		return nil, err
 	}
 	out := &types.ModelUsageAggregate{LogicalCallCount: row.LogicalCallCount, SuccessCount: row.SuccessCount, FailureCount: row.FailureCount,
-		UnknownCostCallCount: row.UnknownCostCallCount, CacheEligibleCount: row.CacheEligibleCount, CacheReportedCount: row.CacheReportedCount, CacheUnsupportedCount: row.CacheUnsupportedCount}
+		UnknownCostCallCount: row.UnknownCostCallCount, PricedCallCount: row.PricedCallCount, CacheEligibleCount: row.CacheEligibleCount, CacheReportedCount: row.CacheReportedCount, CacheUnsupportedCount: row.CacheUnsupportedCount}
 	assignInt := func(v sql.NullInt64) *int64 {
 		if !v.Valid {
 			return nil
@@ -219,6 +226,28 @@ func (r *modelCallRepository) AggregateModelCalls(ctx context.Context, filter ty
 		currency := row.Currency.String
 		out.Currency = &currency
 	}
+	// Additive diagnostics: UNKNOWN reason distribution. One GROUP BY query on
+	// the same filter (never N+1), exposing only the fail-closed reason names.
+	var reasonRows []struct {
+		Reason string `gorm:"column:pricing_reason"`
+		N      int64  `gorm:"column:n"`
+	}
+	if err := r.applyModelCallFilter(r.db.WithContext(ctx), filter).
+		Select("pricing_reason, COUNT(*) AS n").
+		Where("pricing_status = ?", types.PricingStatusUnknown).
+		Where("pricing_reason <> ''").
+		Group("pricing_reason").
+		Scan(&reasonRows).Error; err != nil {
+		return nil, err
+	}
+	reasonCounts := map[string]int64{}
+	for _, rr := range reasonRows {
+		if rr.Reason != "" {
+			reasonCounts[rr.Reason] = rr.N
+		}
+	}
+	out.PricingUnknownReasonCounts = reasonCounts
+
 	health, err := r.GetMeasurementHealth(ctx, filter.TenantID, valueOrMin(filter.From), valueOrMax(filter.To))
 	if err != nil {
 		return nil, err

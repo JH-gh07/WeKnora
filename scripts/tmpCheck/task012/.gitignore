@@ -1,0 +1,2 @@
+# Task012 verifier runtime state — never commit transient outputs.
+.run/

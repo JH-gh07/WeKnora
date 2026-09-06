@@ -83,6 +83,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/limiter"
+	"github.com/Tencent/WeKnora/internal/models/pricing"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/router"
 	"github.com/Tencent/WeKnora/internal/storageallowlist"
@@ -183,6 +184,15 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewTemporaryKnowledgeBaseFinder))
 	must(container.Provide(repository.NewModelCallRepository))
 	must(container.Provide(repository.NewEmbeddingCacheRepository))
+
+	// One-provider pricing writer (Task012): the immutable catalog + estimator
+	// feed a recorder decorator that enriches every persisted ModelCall before
+	// the repository write. The decorator is the only types.ModelCallRecorder in
+	// the graph, so the metered model service receives it while the read chain
+	// (model usage / evaluation report) keeps the raw repository.
+	must(container.Provide(pricing.LoadDefaultCatalog))
+	must(container.Provide(pricing.NewEstimator))
+	must(container.Provide(pricing.NewPricingRecorder))
 
 	// MCP manager for managing MCP client connections
 	logger.Debugf(ctx, "[Container] Registering MCP manager...")
