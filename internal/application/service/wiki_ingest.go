@@ -2447,32 +2447,30 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 // summary page permanently. Retries plus failedOps requeuing (see
 // mapOneDocument) turn those events into at-most-a-few-minute hiccups.
 func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel chat.Chat, promptTpl string, data map[string]string) (string, error) {
-	tmpl, err := template.New("wiki").Parse(promptTpl)
-	if err != nil {
-		return "", fmt.Errorf("parse template: %w", err)
-	}
-
 	maskedData, urlMap := maskTemplateDataImageURLs(data)
 
-	var buf strings.Builder
-	if err := tmpl.Execute(&buf, maskedData); err != nil {
-		return "", fmt.Errorf("execute template: %w", err)
-	}
-
-	prompt := buf.String()
 	purpose := wikiPromptPurpose(promptTpl)
-	messages := []chat.Message{{Role: "user", Content: prompt}}
+	var messages []chat.Message
 	if promptTpl == agent.WikiPageModifyUserPrompt {
-		systemPrompt := types.AppendCustomPromptInstructions(
-			agent.WikiPageModifySystemPrompt,
-			maskedData["CustomInstructions"],
-			maskedData["InstructionScope"],
-		)
-		messages = []chat.Message{
-			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: prompt},
+		// Task013 seam: the page-modify message assembly lives in the agent
+		// package so the real-provider prompt-cache A/B harness reuses the
+		// production bytes instead of re-implementing the layout.
+		var err error
+		messages, err = agent.BuildWikiPageModifyMessages(maskedData)
+		if err != nil {
+			return "", err
 		}
 	} else {
+		tmpl, err := template.New("wiki").Parse(promptTpl)
+		if err != nil {
+			return "", fmt.Errorf("parse template: %w", err)
+		}
+		var buf strings.Builder
+		if err := tmpl.Execute(&buf, maskedData); err != nil {
+			return "", fmt.Errorf("execute template: %w", err)
+		}
+		prompt := buf.String()
+		messages = []chat.Message{{Role: "user", Content: prompt}}
 		messages[0].Content = types.AppendCustomPromptInstructions(
 			prompt, maskedData["CustomInstructions"], maskedData["InstructionScope"],
 		)
