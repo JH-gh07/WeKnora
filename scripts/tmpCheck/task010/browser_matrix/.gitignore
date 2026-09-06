@@ -1,0 +1,29 @@
+# Node.js dependencies
+node_modules/
+package-lock.json
+
+# Test evidence and screenshots (belong in status repo)
+browser_evidence/
+browser_evidence_quick/
+*.png
+*.jpg
+*.jpeg
+
+# Test output
+browser_matrix.tsv
+browser_test_summary.json
+run_metadata.json
+
+# Temporary documentation
+DELIVERY_CHECKLIST.md
+FINAL_SUMMARY.txt
+00-START-HERE.txt
+SUMMARY.md
+BROWSER_AUTOMATION_COMPARISON.md
+COMPLETION_CHECKLIST.md
+WORK_COMPLETION_REPORT.md
+START_HERE.sh
+quick_validate_agentbrowser.sh
+QUICK_VALIDATE_GUIDE.md
+INDEX.md
+basic_validation.js

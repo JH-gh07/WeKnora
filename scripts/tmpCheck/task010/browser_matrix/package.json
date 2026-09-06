@@ -1,0 +1,19 @@
+{
+  "name": "task010-browser-tests",
+  "version": "1.0.0",
+  "description": "Browser automation tests for Task010 Evaluation Run Report UI",
+  "private": true,
+  "scripts": {
+    "test": "node run_browser_tests.js",
+    "check": "bash check_environment.sh",
+    "install-browsers": "npx playwright install chromium"
+  },
+  "dependencies": {
+    "playwright": "^1.48.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "author": "WeKnora Team",
+  "license": "UNLICENSED"
+}
