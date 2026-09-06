@@ -1,0 +1,182 @@
+# Task011 (AC-R4) — Scheduled Advisory Quality CI.
+#
+# This is the INDEPENDENT scheduled advisory lane for R4. It is deliberately
+# separate from the PR required check `evaluation-regression / quality` (Task007
+# G5) and is NOT registered in any Ruleset: it cannot block a merge and its
+# failure does not carry "confirmed quality regression" as a merge signal.
+#
+# It reuses the SINGLE deterministic computation authority via the frozen public
+# entry `make reproduce-evaluation` (Task009 G7). It does NOT re-implement any
+# metric, threshold, baseline value, evaluator-hash or comparison logic.
+#
+# Trigger: schedule (weekdays, off the hour) + a no-input workflow_dispatch for
+# manual dry-run of the exact same path. A manual dispatch is NOT authoritative
+# evidence of a real `event=schedule` run (see Task011 Step 7 vs Step 8).
+#
+# Four-state decision (frozen, preserved verbatim):
+#   PASS=0  BLOCK=2  NOT_COMPARABLE=3  ERROR=4   (illegal -> ERROR/4, fail closed)
+#
+# Permissions are least-privilege (contents: read); checkout does not persist
+# credentials; no Repository Secret, provider credential, or environment
+# secret file is ever read; the lane performs no write to git history, no Issue
+# creation, and no mutation of the protected Baseline.
+#
+# Action identity (§4.4): the three actions are pinned to full commit SHA.
+#   actions/checkout@v6        -> d23441a48e516b6c34aea4fa41551a30e30af803
+#   actions/setup-go@v6        -> 924ae3a1cded613372ab5595356fb5720e22ba16
+#   actions/upload-artifact@v4 -> ea165f8d65b6e75b540449e92b4886f43607fa02
+
+name: Evaluation Quality Scheduled
+
+on:
+  schedule:
+    - cron: "17 2 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: evaluation-regression-scheduled-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GO_VERSION: "1.26"
+  GOPROXY: https://proxy.golang.org,direct
+  OUTPUT_DIR: "${{ runner.temp }}/evaluation-scheduled"
+
+jobs:
+  scheduled:
+    name: evaluation-regression-scheduled / quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # --- bootstrap: checkout exact event SHA, no persisted credentials ----
+      - name: Checkout default branch (exact event SHA)
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Go toolchain
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: go.sum
+
+      # --- bootstrap: warm the module cache (network is allowed here only) --
+      - name: Warm module cache
+        run: go mod download
+
+      # --- deterministic execution: offline, no provider/secret/DB ----------
+      # Runs the public entry with GOPROXY=off after the cache warm-up. The
+      # authoritative decision is read from summary.json (.exit_code) written by
+      # the public entry BEFORE it exits; make collapses recipe failures to 2,
+      # so the summary.json field — not make's own code — is the source of truth.
+      - name: Run deterministic public entry (capture decision)
+        id: run
+        shell: bash
+        run: |
+          OUT="$OUTPUT_DIR"
+          set +e
+          GOPROXY=off OUTPUT_DIR="$OUT" make reproduce-evaluation
+          make_code=$?
+          set -e
+          echo "make_exit=$make_code" >> "$GITHUB_ENV"
+          code=4
+          if [ -f "$OUT/summary.json" ]; then
+            c="$(jq -r '.exit_code // empty' "$OUT/summary.json" 2>/dev/null || true)"
+            case "$c" in 0|2|3|4) code="$c" ;; esac
+          fi
+          echo "decision_exit=$code" >> "$GITHUB_ENV"
+          echo "decision_exit=$code" >> "$GITHUB_OUTPUT"
+          echo "decision_exit=$code (make_exit=$make_code)"
+
+      # --- write a non-sensitive workflow context (schema versioned) --------
+      - name: Write workflow context
+        if: always()
+        shell: bash
+        run: |
+          OUT="$OUTPUT_DIR"
+          mkdir -p "$OUT"
+          TREE="$(jq -r '.tree_hash // empty' "$OUT/source_identity.json" 2>/dev/null || true)"
+          SCHED="(workflow_dispatch manual)"
+          [ "${{ github.event_name }}" = "schedule" ] && SCHED="${{ github.event.schedule }}"
+          jq -n \
+            --arg schema "scheduled_workflow_context/1" \
+            --arg event "${{ github.event_name }}" \
+            --arg repo "${{ github.repository }}" \
+            --arg branch "${{ github.ref_name }}" \
+            --arg sha "${{ github.sha }}" \
+            --arg tree "$TREE" \
+            --arg wref "${{ github.workflow_ref }}" \
+            --arg rid "${{ github.run_id }}" \
+            --arg ratt "${{ github.run_attempt }}" \
+            --arg sched "$SCHED" \
+            --arg start "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{schema_version:$schema,event_name:$event,repository:$repo,default_branch:$branch,commit_full:$sha,tree_hash:$tree,workflow_ref:$wref,run_id:$rid,run_attempt:$ratt,scheduled_expression:$sched,actual_start_utc:$start}' \
+            > "$OUT/workflow_context.json"
+
+      # --- render job summary (always; identity + decision fields) ----------
+      - name: Render job summary
+        if: always()
+        shell: bash
+        run: |
+          OUT="$OUTPUT_DIR"
+          ctx="$OUT/workflow_context.json"
+          sum="$OUT/summary.json"
+          src="$OUT/source_identity.json"
+          cmp="$OUT/comparison_decision.json"
+          get() { jq -r "$1" "$2" 2>/dev/null || true; }
+          {
+            echo "# Scheduled Quality Advisory"
+            echo ""
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| event_name | $(get .event_name "$ctx") |"
+            echo "| repository | $(get .repository "$ctx") |"
+            echo "| default_branch | $(get .default_branch "$ctx") |"
+            echo "| commit_full | $(get .commit_full "$ctx") |"
+            echo "| tree_hash | $(get .tree_hash "$ctx") |"
+            echo "| workflow_ref | $(get .workflow_ref "$ctx") |"
+            echo "| run_id / run_attempt | $(get .run_id "$ctx") / $(get .run_attempt "$ctx") |"
+            echo "| scheduled_expression | $(get .scheduled_expression "$ctx") |"
+            echo "| actual_start_utc | $(get .actual_start_utc "$ctx") |"
+            echo "| decision | $(get .decision "$sum") |"
+            echo "| decision_exit | $(get .exit_code "$sum") |"
+            echo "| baseline_id | $(get .baseline_id "$src") |"
+            echo "| fixture_artifact_hash | $(get .fixture_artifact_hash "$src") |"
+            echo "| comparison_policy_hash | $(get .comparison_policy_hash "$src") |"
+            echo "| evaluator_artifact_hash | $(get .evaluator_artifact_hash "$src") |"
+            echo "| ranking_artifact_hash | $(get .ranking_artifact_hash "$src") |"
+            echo "| preflight_reason_codes | $(get '.preflight_reason_codes | join(",")' "$sum") |"
+            echo "| failed_rules | $(get '.failed_rules | join(",")' "$sum") |"
+            echo "| artifact_name | evaluation-scheduled-${{ github.run_id }}-${{ github.run_attempt }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # --- upload evidence unconditionally (even on BLOCK/3/4) --------------
+      - name: Upload evaluation artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: evaluation-scheduled-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evaluation-scheduled/
+          if-no-files-found: warn
+          retention-days: 30
+
+      # --- enforce the captured decision (fail closed) ----------------------
+      # Advisory only means it is NOT in the Ruleset; it does NOT mean "always
+      # green". 0=PASS success; 2/3/4=failure; illegal -> ERROR/4.
+      - name: Enforce decision
+        if: always()
+        shell: bash
+        run: |
+          code="${decision_exit:-4}"
+          case "$code" in
+            0) echo "PASS: no confirmed quality regression"; exit 0 ;;
+            2) echo "BLOCK: confirmed quality regression vs baseline"; exit 2 ;;
+            3) echo "NOT_COMPARABLE: identity/contract mismatch, comparison refused"; exit 3 ;;
+            4) echo "ERROR: infrastructure or execution failure"; exit 4 ;;
+            *) echo "ERROR: unexpected decision exit $code"; exit 4 ;;
+          esac

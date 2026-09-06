@@ -320,6 +320,15 @@ make reproduce-evaluation
 > `ERROR/4 (build_failed)` 退出，而不是被误报为质量退化。仓库目前没有 vendor
 > 全部 Go 依赖。
 
+> **定时巡检通道（Task011/AC-R4）：** 独立的 workflow
+> `.github/workflows/evaluation-regression-scheduled.yml` 在默认分支上按工作日
+> （`17 2 * * 1-5` UTC，即北京 10:17）周期运行同一公开命令，并提供无参数手动
+> dispatch 用于 dry-run。它属于**建议性（advisory）**——不阻断合并、也不注册为
+> required check——四态决策原样保留。仅 `contents: read` 权限，不读取任何
+> Provider 密钥。请注意区分：**PR required check** 阻断 PR 中的质量回归，
+> **定时巡检通道** 持续暴露默认分支的漂移，**Provider 实验**（成本 / Prompt
+> Cache 趋势）则属于未来独立通道。
+
 **详情：** [可复现性与基准契约](./docs/reproducibility.md)
 
 

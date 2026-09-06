@@ -198,3 +198,29 @@ The following are exercised against the entry (see the G7 verification plan):
 - no network → succeeds
 - absent adjacent `status/` directory → succeeds
 - post-run tracked tree has zero diff and no undeclared residue
+
+## 10. Scheduled advisory lane (Task011 / AC-R4)
+
+A dedicated scheduled lane reuses this exact public command on the default
+branch, on a fixed weekday cycle. It is separate from the PR required check and
+is NOT registered in any Ruleset.
+
+| Aspect | Contract |
+| --- | --- |
+| Workflow | `.github/workflows/evaluation-regression-scheduled.yml` |
+| Trigger | `schedule` cron `17 2 * * 1-5` + no-input `workflow_dispatch` (dry-run) |
+| Permissions | `contents: read` only; checkout `persist-credentials: false` |
+| Provider / secret | none (P0); no Repository Secret / `.env` read |
+| Decision | identical four-state contract (§5): `PASS=0 BLOCK=2 NOT_COMPARABLE=3 ERROR=4` |
+| Enforcement | three-phase: run+capture → always render+upload artifact (30 days) → enforce 0/2/3/4 |
+
+Bootstrap may use network for the Go toolchain/modules; the deterministic
+execution phase runs with `GOPROXY=off` after a cache warm-up. `make
+reproduce-evaluation` is the single computation authority; the workflow does
+not re-implement any metric, threshold, baseline value or hash algorithm. A
+scheduled run is advisory: it does not block a merge and its failure must not
+be reported as "confirmed quality regression" unless the decision is `BLOCK/2`.
+
+> The existence of the workflow file does not prove a real `event=schedule` run
+> has happened. Operational evidence (enabled state, run JSON, head SHA,
+> timestamps, artifact digest) is recorded separately in the Task011 evidence.
