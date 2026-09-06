@@ -17,11 +17,9 @@ if [[ -d "$SCRIPT_DIR/browser_matrix/browser_evidence_quick" ]]; then
   rm -rf "$SCRIPT_DIR/browser_matrix/browser_evidence_quick"
 fi
 
-# Remove node_modules (should not be committed)
-if [[ -d "$SCRIPT_DIR/browser_matrix/node_modules" ]]; then
-  echo "Removing $SCRIPT_DIR/browser_matrix/node_modules/"
-  rm -rf "$SCRIPT_DIR/browser_matrix/node_modules"
-fi
+# NOTE: node_modules is NOT removed here — it is a runtime dependency for
+# browser_matrix. It is excluded from git via .gitignore instead, so the
+# Playwright test suite remains runnable after cleanup.
 
 # Remove temporary documentation files
 temp_docs=(
