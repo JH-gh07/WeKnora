@@ -54,6 +54,29 @@ have() { [ -f "$1" ]; }
 # =============================================================================
 # STATIC checks
 # =============================================================================
+ck_s00_gofmt() {
+  local unformatted
+  unformatted="$(gofmt -l \
+    "$PKG"/*.go \
+    "$REPO_ROOT/internal/application/repository/model_call.go" \
+    "$REPO_ROOT/internal/application/repository/model_call_test.go" \
+    "$REPO_ROOT/internal/application/service/model.go" \
+    "$REPO_ROOT/internal/container/container.go" \
+    "$REPO_ROOT/internal/database/migration_embedding_cache_test.go" \
+    "$REPO_ROOT/internal/database/migration_model_calls_test.go" \
+    "$REPO_ROOT/internal/database/migration_sqlite_versioned_schema_test.go" \
+    "$REPO_ROOT/internal/tracing/langfuse/asynq.go" \
+    "$REPO_ROOT/internal/tracing/langfuse/asynq_test.go" \
+    "$REPO_ROOT/internal/types/model_call.go" \
+    "$REPO_ROOT/internal/types/tracing.go" \
+    "$REPO_ROOT/scripts/tmpCheck/task012/live_probe/main.go")"
+  if [ -z "$unformatted" ]; then
+    record s00.gofmt PASS "Task012 Go files are gofmt-clean"; return 0
+  else
+    record s00.gofmt FAIL "unformatted: $unformatted"; return 1
+  fi
+}
+
 ck_s01_catalog_file() {
   if have "$CAT"; then record s01.catalog_file PASS "catalogs/siliconflow.json present"; return 0
   else record s01.catalog_file FAIL "catalog JSON missing"; return 1; fi
@@ -136,7 +159,7 @@ ck_s12_reason_allowlist() {
 }
 
 run_static() {
-  ck_s01_catalog_file; ck_s02_catalog_valid; ck_s03_estimator_pure; ck_s04_no_float_multiply
+  ck_s00_gofmt; ck_s01_catalog_file; ck_s02_catalog_valid; ck_s03_estimator_pure; ck_s04_no_float_multiply
   ck_s05_recorder_delegate; ck_s06_migrations; ck_s07_types_fields; ck_s08_di_wiring
   ck_s09_unit_tests; ck_s10_race; ck_s11_vet_build; ck_s12_reason_allowlist
 }

@@ -268,9 +268,9 @@ func TestEstimateConcurrentIdentical(t *testing.T) {
 
 func TestRoundHalfUpDiv(t *testing.T) {
 	cases := []struct {
-		raw   int64
-		div   int64
-		want  int64
+		raw  int64
+		div  int64
+		want int64
 	}{
 		{0, 1_000_000, 0},
 		{1_000_000, 1_000_000, 1},

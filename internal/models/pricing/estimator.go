@@ -15,18 +15,18 @@ type PricingResult struct {
 	Reason types.PricingReason
 
 	// Populated only when Status == PRICED.
-	Currency                  string
-	EstimatedCostNanos        *int64
-	PricingVersion            string
-	PricingSource             string
-	PricingEffectiveAt        *time.Time
-	PricingRuleID             string
-	PricingCatalogHash        string
-	PricingUnit               string
-	InputUnitPriceNanos       int64
-	OutputUnitPriceNanos      int64
-	CacheReadUnitPriceNanos   *int64
-	CacheWriteUnitPriceNanos  *int64
+	Currency                 string
+	EstimatedCostNanos       *int64
+	PricingVersion           string
+	PricingSource            string
+	PricingEffectiveAt       *time.Time
+	PricingRuleID            string
+	PricingCatalogHash       string
+	PricingUnit              string
+	InputUnitPriceNanos      int64
+	OutputUnitPriceNanos     int64
+	CacheReadUnitPriceNanos  *int64
+	CacheWriteUnitPriceNanos *int64
 }
 
 // CostEstimator is the narrow dependency used by the pricing recorder. It is a
