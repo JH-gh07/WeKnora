@@ -43,7 +43,6 @@ concurrency:
 env:
   GO_VERSION: "1.26"
   GOPROXY: https://proxy.golang.org,direct
-  OUTPUT_DIR: "${{ runner.temp }}/evaluation-scheduled"
 
 jobs:
   scheduled:
@@ -78,7 +77,7 @@ jobs:
         id: run
         shell: bash
         run: |
-          OUT="$OUTPUT_DIR"
+          OUT="${{ runner.temp }}/evaluation-scheduled"
           set +e
           GOPROXY=off OUTPUT_DIR="$OUT" make reproduce-evaluation
           make_code=$?
@@ -98,7 +97,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          OUT="$OUTPUT_DIR"
+          OUT="${{ runner.temp }}/evaluation-scheduled"
           mkdir -p "$OUT"
           TREE="$(jq -r '.tree_hash // empty' "$OUT/source_identity.json" 2>/dev/null || true)"
           SCHED="(workflow_dispatch manual)"
@@ -123,7 +122,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          OUT="$OUTPUT_DIR"
+          OUT="${{ runner.temp }}/evaluation-scheduled"
           ctx="$OUT/workflow_context.json"
           sum="$OUT/summary.json"
           src="$OUT/source_identity.json"
