@@ -12,12 +12,17 @@ package types
 //   - the langfuse package can remain a leaf dependency that only types
 //     (and its own tests) reference directly.
 //
-// The JSON tags all use the "lf_" prefix and omitempty so that payloads
-// constructed before the Langfuse feature landed remain byte-compatible
-// (empty fields collapse to nothing in the serialized output) and so that
-// Langfuse-specific columns don't collide with business fields that may
-// happen to be named similarly.
+// Every field uses a namespaced JSON tag and omitempty so payloads constructed
+// before propagation landed remain compatible (empty fields collapse to
+// nothing) and observability fields cannot collide with business fields.
 type TracingContext struct {
+	// Model-call attribution is independent of Langfuse. These fields preserve
+	// Evaluation run identity across the process boundary into an asynq worker,
+	// including when Langfuse is disabled.
+	LLMRunID   string `json:"llm_run_id,omitempty"`
+	LLMTaskID  string `json:"llm_task_id,omitempty"`
+	LLMTraceID string `json:"llm_trace_id,omitempty"`
+
 	// LangfuseTraceID is the id of the root trace that originated this task.
 	// Kept for backward compatibility with legacy payloads; the OTLP path now
 	// propagates correlation via LangfuseTraceparent (W3C) below.

@@ -47,7 +47,7 @@ func NewMeteredModelService(repo interfaces.ModelRepository,
 	ollamaService *ollama.OllamaService,
 	pooler embedding.EmbedderPooler,
 	tenantService interfaces.TenantService,
-	callRecorder interfaces.ModelCallRepository,
+	callRecorder types.ModelCallRecorder,
 	embeddingCache interfaces.EmbeddingCacheRepository,
 	cfg *config.Config,
 ) interfaces.ModelService {

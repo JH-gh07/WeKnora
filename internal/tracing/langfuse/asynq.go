@@ -22,28 +22,28 @@ import (
 // processing. This also makes a sop3 run's traceparent propagate through to
 // any asynq jobs WeKnora enqueues while serving sop3's agent-chat call.
 //
-// Safe to call unconditionally: when Langfuse is disabled or no span is
-// present on ctx, it writes a zero-valued TracingContext — which round-trips
-// through JSON as absent fields and costs nothing.
+// Safe to call unconditionally: model-call attribution is propagated even
+// when Langfuse is disabled; absent values round-trip through JSON as omitted
+// fields.
 func InjectTracing(ctx context.Context, carrier types.LangfuseTracingCarrier) {
 	if carrier == nil {
 		return
 	}
-	mgr := GetManager()
-	if !mgr.Enabled() {
-		return
-	}
 	tc := types.TracingContext{}
-	c := propagation.MapCarrier{}
-	propagator.Inject(ctx, c)
-	tc.LangfuseTraceparent = c["traceparent"]
-	// Backward-compat: keep LangfuseTraceID = the W3C trace id for any legacy
-	// reader. LangfuseParentObservationID is no longer used by the OTLP path.
-	if trace, ok := TraceFromContext(ctx); ok && trace != nil {
-		tc.LangfuseTraceID = trace.ID
+	tc.LLMRunID, tc.LLMTaskID, tc.LLMTraceID = types.LLMCallScopeFromContext(ctx)
+	mgr := GetManager()
+	if mgr.Enabled() {
+		c := propagation.MapCarrier{}
+		propagator.Inject(ctx, c)
+		tc.LangfuseTraceparent = c["traceparent"]
+		// Backward-compat: keep LangfuseTraceID = the W3C trace id for any legacy
+		// reader. LangfuseParentObservationID is no longer used by the OTLP path.
+		if trace, ok := TraceFromContext(ctx); ok && trace != nil {
+			tc.LangfuseTraceID = trace.ID
+		}
+		tc.LangfuseUserID = userIDFromCtx(ctx)
+		tc.LangfuseSessionID = sessionIDFromCtx(ctx)
 	}
-	tc.LangfuseUserID = userIDFromCtx(ctx)
-	tc.LangfuseSessionID = sessionIDFromCtx(ctx)
 	carrier.SetLangfuseTracing(tc)
 }
 
@@ -82,12 +82,13 @@ func peekTracingContext(payload []byte) types.TracingContext {
 func AsynqMiddleware() asynq.MiddlewareFunc {
 	return func(next asynq.Handler) asynq.Handler {
 		return asynq.HandlerFunc(func(ctx context.Context, task *asynq.Task) error {
+			tc := peekTracingContext(task.Payload())
+			ctx = types.WithLLMCallScope(ctx, tc.LLMRunID, tc.LLMTaskID, tc.LLMTraceID)
 			mgr := GetManager()
 			if !mgr.Enabled() {
 				return next.ProcessTask(ctx, task)
 			}
 
-			tc := peekTracingContext(task.Payload())
 			taskID, _ := asynq.GetTaskID(ctx)
 			retryCount, _ := asynq.GetRetryCount(ctx)
 			maxRetry, _ := asynq.GetMaxRetry(ctx)

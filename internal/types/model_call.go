@@ -66,6 +66,34 @@ type PricingIdentity struct {
 	EffectiveAt *time.Time `json:"pricing_effective_at,omitempty"`
 }
 
+// PricingStatus is the pricing availability of a ModelCall. A call is only
+// PRICED when a frozen exact rule and final provider-reported usage produce a
+// reproducible fixed-point estimate. Everything else is UNKNOWN with a reason.
+type PricingStatus string
+
+const (
+	PricingStatusPriced  PricingStatus = "PRICED"
+	PricingStatusUnknown PricingStatus = "UNKNOWN"
+)
+
+// PricingReason is the fail-closed allowlist explaining an UNKNOWN cost fact.
+// It must never carry provider error bodies, prompts, or response content.
+type PricingReason string
+
+const (
+	PricingReasonLegacyUnpriced               PricingReason = "LEGACY_UNPRICED"
+	PricingReasonNoExactRule                  PricingReason = "NO_EXACT_RULE"
+	PricingReasonRuleNotYetValid              PricingReason = "RULE_NOT_YET_VALID"
+	PricingReasonRuleExpired                  PricingReason = "RULE_EXPIRED"
+	PricingReasonCatalogUnavailable           PricingReason = "CATALOG_UNAVAILABLE"
+	PricingReasonUsageUnavailable             PricingReason = "USAGE_UNAVAILABLE"
+	PricingReasonUsagePartial                 PricingReason = "USAGE_PARTIAL"
+	PricingReasonInvalidUsage                 PricingReason = "INVALID_USAGE"
+	PricingReasonUnobservableBillingDimension PricingReason = "UNOBSERVABLE_BILLING_DIMENSION"
+	PricingReasonCalculationOverflow          PricingReason = "CALCULATION_OVERFLOW"
+	PricingReasonNonProviderPricedModel       PricingReason = "NON_PROVIDER_PRICED_MODEL"
+)
+
 // ModelCall is one logical Chat, Embedding, or Rerank abstraction invocation.
 // Nullable usage and cost fields represent unknown values; zero is a real,
 // observed zero and must not be used as a stand-in for unavailable telemetry.
@@ -110,6 +138,21 @@ type ModelCall struct {
 	PricingSource      string     `json:"pricing_source,omitempty" gorm:"column:pricing_source;type:varchar(128)"`
 	PricingEffectiveAt *time.Time `json:"pricing_effective_at,omitempty" gorm:"column:pricing_effective_at"`
 
+	// Recomputable pricing snapshot (Task012 §6.2). All fields are nullable so
+	// legacy rows stay NULL and are interpreted as legacy-unknown. Only a
+	// PRICED row fills every non-nullable field here together with the
+	// compatibility EstimatedCost/Currency/Pricing* fields above.
+	PricingStatus        PricingStatus `json:"pricing_status,omitempty" gorm:"column:pricing_status;type:varchar(24)"`
+	PricingReason        PricingReason `json:"pricing_reason,omitempty" gorm:"column:pricing_reason;type:varchar(48)"`
+	PricingRuleID        string        `json:"pricing_rule_id,omitempty" gorm:"column:pricing_rule_id;type:varchar(128)"`
+	PricingCatalogHash   string        `json:"pricing_catalog_hash,omitempty" gorm:"column:pricing_catalog_hash;type:varchar(64)"`
+	PricingUnit          string        `json:"pricing_unit,omitempty" gorm:"column:pricing_unit;type:varchar(32)"`
+	InputUnitPriceNanos  *int64        `json:"input_unit_price_nanos_per_million,omitempty" gorm:"column:input_unit_price_nanos_per_million"`
+	OutputUnitPriceNanos *int64        `json:"output_unit_price_nanos_per_million,omitempty" gorm:"column:output_unit_price_nanos_per_million"`
+	CacheReadUnitNanos   *int64        `json:"cache_read_unit_price_nanos_per_million,omitempty" gorm:"column:cache_read_unit_price_nanos_per_million"`
+	CacheWriteUnitNanos  *int64        `json:"cache_write_unit_price_nanos_per_million,omitempty" gorm:"column:cache_write_unit_price_nanos_per_million"`
+	EstimatedCostNanos   *int64        `json:"estimated_cost_nanos,omitempty" gorm:"column:estimated_cost_nanos"`
+
 	CreatedAt time.Time `json:"created_at" gorm:"column:created_at;index"`
 }
 
@@ -125,26 +168,31 @@ type ModelCallFilter struct {
 }
 
 type ModelUsageAggregate struct {
-	LogicalCallCount         int64                   `json:"logical_call_count"`
-	SuccessCount             int64                   `json:"success_count"`
-	FailureCount             int64                   `json:"failure_count"`
-	InputTokens              *int64                  `json:"input_tokens,omitempty"`
-	OutputTokens             *int64                  `json:"output_tokens,omitempty"`
-	CacheReadTokens          *int64                  `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens         *int64                  `json:"cache_write_tokens,omitempty"`
-	CacheMissTokens          *int64                  `json:"cache_miss_tokens,omitempty"`
-	CacheReportedInputTokens *int64                  `json:"cache_reported_input_tokens,omitempty"`
-	KnownCostTotal           *float64                `json:"known_cost_total,omitempty"`
-	Currency                 *string                 `json:"currency,omitempty"`
-	MixedCurrency            bool                    `json:"mixed_currency"`
-	UnknownCostCallCount     int64                   `json:"unknown_cost_call_count"`
-	CacheEligibleCount       int64                   `json:"cache_eligible_count"`
-	CacheReportedCount       int64                   `json:"cache_reported_count"`
-	CacheUnsupportedCount    int64                   `json:"cache_unsupported_count"`
-	MeasurementStatus        MeasurementHealthStatus `json:"measurement_status"`
-	MeteringAttemptedCount   int64                   `json:"metering_attempted_count"`
-	MeteringPersistedCount   int64                   `json:"metering_persisted_count"`
-	MeteringFailedCount      int64                   `json:"metering_failed_count"`
+	LogicalCallCount         int64    `json:"logical_call_count"`
+	SuccessCount             int64    `json:"success_count"`
+	FailureCount             int64    `json:"failure_count"`
+	InputTokens              *int64   `json:"input_tokens,omitempty"`
+	OutputTokens             *int64   `json:"output_tokens,omitempty"`
+	CacheReadTokens          *int64   `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens         *int64   `json:"cache_write_tokens,omitempty"`
+	CacheMissTokens          *int64   `json:"cache_miss_tokens,omitempty"`
+	CacheReportedInputTokens *int64   `json:"cache_reported_input_tokens,omitempty"`
+	KnownCostTotal           *float64 `json:"known_cost_total,omitempty"`
+	Currency                 *string  `json:"currency,omitempty"`
+	MixedCurrency            bool     `json:"mixed_currency"`
+	UnknownCostCallCount     int64    `json:"unknown_cost_call_count"`
+	// PricedCallCount and PricingUnknownReasonCounts are additive diagnostics:
+	// how many calls carry a PRICED fact and, for UNKNOWN rows, the fail-closed
+	// reason distribution. They never change the cost total semantics above.
+	PricedCallCount            int64                   `json:"priced_call_count"`
+	PricingUnknownReasonCounts map[string]int64        `json:"pricing_unknown_reason_counts,omitempty"`
+	CacheEligibleCount         int64                   `json:"cache_eligible_count"`
+	CacheReportedCount         int64                   `json:"cache_reported_count"`
+	CacheUnsupportedCount      int64                   `json:"cache_unsupported_count"`
+	MeasurementStatus          MeasurementHealthStatus `json:"measurement_status"`
+	MeteringAttemptedCount     int64                   `json:"metering_attempted_count"`
+	MeteringPersistedCount     int64                   `json:"metering_persisted_count"`
+	MeteringFailedCount        int64                   `json:"metering_failed_count"`
 	// LocalEmbeddingCache is the additive local-cache fact. It is always
 	// present (never merged into the Prompt Cache fields above) and reports
 	// DISABLED when the capability is implemented but the rollout switch is

@@ -31,9 +31,21 @@ var versionedSQLiteColumns = map[string][]string{
 	"tenant_invitations": {"token", "accepted_count"},        // 000054
 	"embed_channels":     {"allow_memory"},                   // 000060
 	"mcp_oauth_tokens":   {"principal_type", "principal_id"}, // 000064
+	"model_calls": {
+		"pricing_status",
+		"pricing_reason",
+		"pricing_rule_id",
+		"pricing_catalog_hash",
+		"pricing_unit",
+		"input_unit_price_nanos_per_million",
+		"output_unit_price_nanos_per_million",
+		"cache_read_unit_price_nanos_per_million",
+		"cache_write_unit_price_nanos_per_million",
+		"estimated_cost_nanos",
+	}, // 000094 / SQLite 000017
 }
 
-const expectedSQLiteMigrationVersion = 16
+const expectedSQLiteMigrationVersion = 17
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)

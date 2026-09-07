@@ -55,29 +55,70 @@ func TestSQLiteMigrationsModelCallsRepeatAndDown(t *testing.T) {
 	latest, dirty, err := m.Version()
 	require.NoError(t, err)
 	require.False(t, dirty)
-	require.Equal(t, uint(16), latest, "SQLite migration set must include the reported-input denominator migration")
+	require.Equal(t, uint(17), latest, "SQLite migration set must include the pricing snapshot migration")
 
 	// Repeat up is a no-op, not an error.
 	require.ErrorIs(t, m.Up(), migrate.ErrNoChange)
 
-	// Two steps down: drop the embedding-cache migration (000016), then the
-	// additive denominator column (000015). The model_calls facts survive.
-	require.NoError(t, m.Steps(-2))
+	// One step down drops the pricing snapshot migration (000017). The
+	// model_calls facts and earlier additive columns survive.
+	require.NoError(t, m.Steps(-1))
 	downVersion, dirty, err := m.Version()
 	require.NoError(t, err)
 	require.False(t, dirty)
-	require.Equal(t, latest-2, downVersion)
+	require.Equal(t, latest-1, downVersion)
 	require.True(t, taskSQLiteTableExists(t, dbPath, "model_calls"), "down must preserve model_calls")
-	require.False(t, taskSQLiteColumnExists(t, dbPath, "model_calls", "cache_reported_input_tokens"), "down must remove only the additive column")
+	require.False(t, taskSQLiteColumnExists(t, dbPath, "model_calls", "pricing_status"), "down must remove the pricing snapshot columns")
+	require.False(t, taskSQLiteColumnExists(t, dbPath, "model_calls", "estimated_cost_nanos"), "down must remove estimated_cost_nanos")
+	require.True(t, taskSQLiteColumnExists(t, dbPath, "model_calls", "cache_reported_input_tokens"), "down must not remove earlier additive column")
 
-	// Up again restores the denominator column.
+	// Up again restores the pricing snapshot columns.
 	require.NoError(t, m.Up())
 	upVersion, dirty, err := m.Version()
 	require.NoError(t, err)
 	require.False(t, dirty)
 	require.Equal(t, latest, upVersion)
-	require.True(t, taskSQLiteTableExists(t, dbPath, "model_calls"), "up must recreate model_calls")
-	require.True(t, taskSQLiteColumnExists(t, dbPath, "model_calls", "cache_reported_input_tokens"), "up must restore additive column")
+	require.True(t, taskSQLiteColumnExists(t, dbPath, "model_calls", "pricing_status"), "up must restore pricing snapshot columns")
+	require.True(t, taskSQLiteColumnExists(t, dbPath, "model_calls", "estimated_cost_nanos"), "up must restore estimated_cost_nanos")
+}
+
+// TestSQLiteMigrationsPricingSnapshotNullableAndRoundTrip proves the additive
+// pricing snapshot columns are nullable (legacy rows stay NULL) and carry a
+// priced row's fixed-point facts intact.
+func TestSQLiteMigrationsPricingSnapshotNullableAndRoundTrip(t *testing.T) {
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	require.NoError(t, err)
+	previousDir, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(repoRoot))
+	t.Cleanup(func() { _ = os.Chdir(previousDir) })
+
+	dbPath := filepath.Join(t.TempDir(), "pricing-snapshot-migration.db")
+	require.NoError(t, RunMigrationsWithOptions("sqlite3://unused", MigrationOptions{SQLiteDBPath: dbPath}))
+	db, err := sql.Open("sqlite3", dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	// Legacy row: no pricing snapshot columns set.
+	_, err = db.Exec(`INSERT INTO model_calls (id, tenant_id, model_id, operation, usage_finality, cache_status, success, attempt_observability) VALUES ('legacy', 1, 'm', 'chat', 'unavailable', 'unreported', 1, 'unobservable')`)
+	require.NoError(t, err)
+	var pricingStatus, pricingReason, pricingUnit, estimatedCostNanos any
+	require.NoError(t, db.QueryRow(`SELECT pricing_status, pricing_reason, pricing_unit, estimated_cost_nanos FROM model_calls WHERE id='legacy'`).Scan(&pricingStatus, &pricingReason, &pricingUnit, &estimatedCostNanos))
+	require.Nil(t, pricingStatus)
+	require.Nil(t, pricingReason)
+	require.Nil(t, pricingUnit)
+	require.Nil(t, estimatedCostNanos)
+
+	// Priced row round trip.
+	_, err = db.Exec(`INSERT INTO model_calls (id, tenant_id, model_id, operation, usage_finality, cache_status, success, attempt_observability, pricing_status, pricing_reason, pricing_rule_id, pricing_catalog_hash, pricing_unit, input_unit_price_nanos_per_million, output_unit_price_nanos_per_million, estimated_cost_nanos) VALUES ('priced', 1, 'm', 'chat', 'reported', 'unreported', 1, 'unobservable', 'PRICED', '', 'r1', 'h1', 'per_1m_tokens', 500000000, 2000000000, 150000)`)
+	require.NoError(t, err)
+	var gotStatus string
+	var gotInput, gotOutput, gotNanos int64
+	require.NoError(t, db.QueryRow(`SELECT pricing_status, input_unit_price_nanos_per_million, output_unit_price_nanos_per_million, estimated_cost_nanos FROM model_calls WHERE id='priced'`).Scan(&gotStatus, &gotInput, &gotOutput, &gotNanos))
+	require.Equal(t, "PRICED", gotStatus)
+	require.Equal(t, int64(500000000), gotInput)
+	require.Equal(t, int64(2000000000), gotOutput)
+	require.Equal(t, int64(150000), gotNanos)
 }
 
 func taskSQLiteColumnExists(t *testing.T, dbPath, table, column string) bool {

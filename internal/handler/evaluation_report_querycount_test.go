@@ -99,15 +99,16 @@ func TestReportQueryCountIsFixed(t *testing.T) {
 		t.Fatalf("logical calls = %d, want %d", rep.Usage.LogicalCallCount, callCount)
 	}
 
-	// Fixed query count (4, constant regardless of call volume):
+	// Fixed query count (5, constant regardless of call volume):
 	//   1. EvaluationRun lookup (GetByRunID)
 	//   2. model_calls aggregate (AggregateModelCalls)
-	//   3. tenant-window health embedded in the shared usage aggregate
+	//   3. pricing UNKNOWN reason distribution (one GROUP BY, never per-row)
+	//   4. tenant-window health embedded in the shared usage aggregate
 	//      (part of the G2B ModelUsageService.Aggregate contract, all-time window)
-	//   4. run-window tenant health (report-specific observation window)
+	//   5. run-window tenant health (report-specific observation window)
 	// Local embedding cache is DISABLED here, so no extra observation query.
 	// No per-row fan-out: the count must NOT grow with the 10k seeded calls.
-	const want = 4
+	const want = 5
 	if got := counter.Load(); got != want {
 		t.Fatalf("query count = %d, want %d (N+1 or unbounded fan-out detected)", got, want)
 	}
@@ -125,7 +126,7 @@ func TestReportQueryCountIndependentOfVolume(t *testing.T) {
 		t.Fatalf("expected 200, got %d", code)
 	}
 	// The single-call path must equal the fixed budget as well.
-	if got := counter.Load(); got != 4 {
-		t.Fatalf("single-call query count = %d, want 4", got)
+	if got := counter.Load(); got != 5 {
+		t.Fatalf("single-call query count = %d, want 5", got)
 	}
 }

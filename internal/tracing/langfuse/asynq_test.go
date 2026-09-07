@@ -29,6 +29,44 @@ func TestInjectTracing_DisabledIsZero(t *testing.T) {
 	}
 }
 
+func TestInjectTracing_DisabledStillCarriesModelCallScope(t *testing.T) {
+	_, _ = Init(Config{Enabled: false})
+
+	ctx := types.WithLLMCallScope(context.Background(), "run-1", "task-1", "trace-1")
+	p := &dummyPayload{KnowledgeID: "k1"}
+	InjectTracing(ctx, p)
+	raw, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"llm_run_id":"run-1"`,
+		`"llm_task_id":"task-1"`,
+		`"llm_trace_id":"trace-1"`,
+	} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("payload %s does not contain %s", raw, want)
+		}
+	}
+}
+
+func TestAsynqMiddleware_RestoresModelCallScopeWhenLangfuseDisabled(t *testing.T) {
+	_, _ = Init(Config{Enabled: false})
+
+	raw := []byte(`{"llm_run_id":"run-1","llm_task_id":"task-1","llm_trace_id":"trace-1"}`)
+	var gotRun, gotTask, gotTrace string
+	mw := AsynqMiddleware()(asynq.HandlerFunc(func(ctx context.Context, _ *asynq.Task) error {
+		gotRun, gotTask, gotTrace = types.LLMCallScopeFromContext(ctx)
+		return nil
+	}))
+	if err := mw.ProcessTask(context.Background(), asynq.NewTask("test:type", raw)); err != nil {
+		t.Fatal(err)
+	}
+	if gotRun != "run-1" || gotTask != "task-1" || gotTrace != "trace-1" {
+		t.Fatalf("restored scope = (%q, %q, %q)", gotRun, gotTask, gotTrace)
+	}
+}
+
 // TestInjectTracing_PopulatesTraceparent checks that when a trace is active
 // on the context, a W3C traceparent is stamped onto the payload (so the
 // asynq worker can resume the same trace).
