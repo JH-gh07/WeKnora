@@ -15,7 +15,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -379,6 +381,24 @@ func emitTSV(path string, rows []sanitizedRow) error {
 	return os.WriteFile(path, []byte(b.String()), 0o644)
 }
 
+// provenance captures the frozen run identity (plan §6.2).
+func provenance() map[string]any {
+	git := func(args ...string) string {
+		out, err := exec.Command("git", args...).Output()
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(out))
+	}
+	return map[string]any{
+		"operator":     "task013-agent",
+		"actual_start": time.Now().UTC().Format(time.RFC3339),
+		"git_commit":   git("rev-parse", "HEAD"),
+		"git_tree":     git("rev-parse", "HEAD^{tree}"),
+		"environment":  map[string]string{"os": runtime.GOOS, "arch": runtime.GOARCH},
+	}
+}
+
 // loadProtocolHash reads the frozen protocol_hash file and cross-checks it
 // against the canonical protocol JSON bytes (trailing newline ignored).
 func loadProtocolHash(dir string) (string, error) {
@@ -480,6 +500,7 @@ done:
 		"pilot_id": "task013-pilot-v1", "planned_calls": 3, "actual_calls": state.calls,
 		"spent_nanos": state.spentNanos, "failures": state.failures,
 		"call4_stream_variant": "skipped_by_design (non_stream_primary)",
+		"provenance":           provenance(),
 	}
 	if err := writeJSON(filepath.Join(cfg.evidenceDir, "pilot_run_summary.json"), summary); err != nil {
 		return err
@@ -573,6 +594,7 @@ func runMain(cfg liveConfig) error {
 		"provider_bound_calls": state.calls, "coalescing": "NONE",
 		"attempt_observability": "FULL", "retries": "none (single attempt per call)",
 		"spent_nanos": state.spentNanos, "failures": state.failures,
+		"provenance": provenance(),
 	}
 	if err := writeJSON(filepath.Join(cfg.evidenceDir, "authoritative_run_summary.json"), summary); err != nil {
 		return err
