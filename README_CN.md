@@ -303,6 +303,35 @@ make dev-frontend
 **详细文档：** [开发环境快速入门](./docs/开发指南.md)
 
 
+### 🔬 评估复现（Official Core）
+
+通过一个公开命令复现确定性检索质量回归（Task007/G5 门禁）——无需 Provider、数据库、Docker 或密钥：
+
+```bash
+make reproduce-evaluation
+```
+
+该命令从当前 commit 重新构建 `cmd/evaluation-regression`，并用 `tests/evaluation/` 下版本化的 fixture / policy / evaluator 契约，将指标与不可变基线 `B001` 比较。退出码遵循四态契约：`PASS=0`、`BLOCK=2`、`NOT_COMPARABLE=3`、`ERROR=4`。输出位于 `reproduction-output/<run-id>/`（或设置 `OUTPUT_DIR=<新目录>`）。
+
+> **Bootstrap 边界：** 该命令包含 Go 构建。冷机首次运行时，若本地没有匹配
+> `go.mod` 的 Go 工具链和 `go.sum` 锁定的模块，构建阶段需要联网下载；也可以事先
+> 预暖对应工具链与 `GOMODCACHE`。依赖准备完成后，确定性执行阶段才是纯离线。
+> 当前不承诺“冷 clone、无依赖缓存且全程断网”仍可成功；该场景会以
+> `ERROR/4 (build_failed)` 退出，而不是被误报为质量退化。仓库目前没有 vendor
+> 全部 Go 依赖。
+
+> **定时巡检通道（Task011/AC-R4）：** 独立的 workflow
+> `.github/workflows/evaluation-regression-scheduled.yml` 在默认分支上按工作日
+> （`17 2 * * 1-5` UTC，即北京 10:17）周期运行同一公开命令，并提供无参数手动
+> dispatch 用于 dry-run。它属于**建议性（advisory）**——不阻断合并、也不注册为
+> required check——四态决策原样保留。仅 `contents: read` 权限，不读取任何
+> Provider 密钥。请注意区分：**PR required check** 阻断 PR 中的质量回归，
+> **定时巡检通道** 持续暴露默认分支的漂移，**Provider 实验**（成本 / Prompt
+> Cache 趋势）则属于未来独立通道。
+
+**详情：** [可复现性与基准契约](./docs/reproducibility.md)
+
+
 ## 🤝 贡献指南
 
 欢迎通过 [Issue](https://github.com/Tencent/WeKnora/issues) 反馈问题或提交 Pull Request。
