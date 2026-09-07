@@ -994,7 +994,11 @@ onMounted(async () => {
         await syncActiveBucketFromChat(initialChatId);
     }
     // 若组织列表未加载则拉取一次，用于侧栏「待审批」角标
-    if (deploymentCapabilities.isSupported('organizations') && orgStore.organizations.length === 0) {
+    // A circular first-paint path (platform prefetch -> chat resources ->
+    // organization store) can briefly expose an incompletely initialized
+    // setup-store proxy. Treat that transient state as an empty list; the
+    // fetch below is idempotent and will hydrate the canonical store.
+    if (deploymentCapabilities.isSupported('organizations') && (orgStore.organizations?.length ?? 0) === 0) {
         orgStore.fetchOrganizations();
     }
 });

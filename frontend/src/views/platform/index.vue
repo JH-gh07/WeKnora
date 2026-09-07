@@ -1,5 +1,5 @@
 <template>
-    <div class="main" ref="dropzone">
+    <div class="main" :class="{ 'main--evaluation-report': route.name === 'evaluationRunDetail' }" ref="dropzone">
         <Menu></Menu>
         <div v-if="isRouterAlive" class="platform-route-outlet">
             <RouterView />
@@ -249,6 +249,21 @@ onUnmounted(() => {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+}
+
+/* A stable run-report URL must remain readable on a phone-sized viewport.
+   The legacy platform shell has a deliberate 600px floor and a 260px
+   desktop sidebar; for this read-only detail route, remove that floor and
+   give the report the full viewport instead of creating unreachable
+   horizontal content. Other platform routes retain their existing layout. */
+@media (max-width: 640px) {
+    .main.main--evaluation-report {
+        min-width: 0;
+    }
+
+    .main.main--evaluation-report > .aside_box {
+        display: none;
+    }
 }
 
 .upload-mask {

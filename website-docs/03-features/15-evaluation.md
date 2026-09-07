@@ -2,28 +2,30 @@
 
 换个向量模型、开不开重排、分块调大一点——这些改动到底有没有让效果变好？评估能力就是用来回答这个问题的：准备一份带标准答案的 QA 数据集，WeKnora 会自动建一个临时知识库灌进语料，逐题跑完整的检索 + 生成流程，最后给出一组可比较的分数（检索侧 Precision / Recall / NDCG / MRR / MAP，生成侧 BLEU / ROUGE）。
 
-::: tip 目前只有 API
-评估暂时没有独立的界面入口，通过 `POST /api/v1/evaluation` 发起、`GET /api/v1/evaluation?task_id=...` 轮询结果，需要 Admin 权限。数据集是 Parquet 格式，格式要求见下文。
+::: tip API + 运行详情页
+通过 `POST /api/v1/evaluation` 发起（Admin 权限），响应的 `data.run_id` 是这次运行的稳定标识；凭它打开 `/platform/evaluations/:runId`（或 `/platform/evaluations` 输入 run_id）即可在同一页面查看检索质量、答案质量、成本与耗时。旧接口 `GET /api/v1/evaluation?task_id=...` 仍保留用于轮询结果。数据集是 Parquet 格式，格式要求见下文。
 :::
 
 用法建议：固定数据集，每次只改一个变量（比如只换 embedding 模型），对比同一组指标，否则分数变化归因不清。
 
 ## API
 
-`internal/router/router.go`：
+`internal/router/routes_infra.go`（在 `internal/router/router.go` 中调用）：
 
 ```go
 evaluationRoutes := g.apiKeyGroup(r.Group("/evaluation"), apiKeyRunEvaluations(apiKeyFullAccess()))
 {
     evaluationRoutes.POST("", g.Admin(), handler.Evaluation)
     evaluationRoutes.GET("", g.Viewer(), handler.GetEvaluationResult)
+    evaluationRoutes.GET("/runs/:run_id/report", g.Viewer(), handler.GetEvaluationRunReport)
 }
 ```
 
 | 方法 | 路径 | 权限 | 说明 |
 | --- | --- | --- | --- |
-| POST | `/api/v1/evaluation` | Admin（API Key 需 `RunEvaluations` 能力） | 创建评估任务，立即返回任务信息 |
-| GET | `/api/v1/evaluation?task_id=...` | Viewer | 查询任务状态、进度与指标结果 |
+| POST | `/api/v1/evaluation` | Admin（API Key 需 `RunEvaluations` 能力） | 创建评估任务，立即返回任务信息（含稳定 `run_id`） |
+| GET | `/api/v1/evaluation?task_id=...` | Viewer | 查询任务状态、进度与指标结果（legacy，保留兼容） |
+| GET | `/api/v1/evaluation/runs/:run_id/report` | Viewer | 按稳定 `run_id` 获取该次运行的统一报告（四类结果） |
 
 ### 创建评估任务
 
@@ -45,11 +47,12 @@ type EvaluationRequest struct {
 | `chat_id` | 否 | 缺省自动选择默认 Chat 模型 |
 | `rerank_id` | 否 | 缺省自动选择默认 Rerank 模型 |
 
-任务 ID 格式为 `evaluation-{tenantID}-{datasetID}`。任务对象（`internal/types/evaluation.go`）：
+legacy 任务 ID 格式为 `evaluation-{tenantID}-{datasetID}`；同一数据集多次运行时该 ID 可复用，不能唯一标识一次执行。每次执行的唯一标识是**稳定 `run_id`（UUID）**，由 `POST` 响应的 `data.run_id` 返回。任务对象（`internal/types/evaluation.go`）：
 
 ```go
 type EvaluationTask struct {
     ID        string           `json:"id"`
+    RunID     string           `json:"run_id"`  // 稳定运行 ID（UUID），Run Detail 以此为定位
     TenantID  uint64           `json:"tenant_id"`
     DatasetID string           `json:"dataset_id"`
     StartTime time.Time        `json:"start_time"`
@@ -258,7 +261,21 @@ type QAPair struct {
 
 任务运行期间可轮询该接口获取 `finished / total` 进度；`status = 3` 时 `err_msg` 携带失败原因。
 
-> **注意**：评估结果存储在**内存**（`evaluationMemoryStorage`：`map[string]*EvaluationDetail` + `sync.RWMutex`，见 `internal/application/service/evaluation.go`），服务重启后任务与结果会丢失，需重新发起评估。
+> **注意（持久化边界）**：运行事实已持久化到 `evaluation_runs` 表（`internal/types/evaluation_run.go`），服务重启后同一 `run_id` 仍可查询到生命周期、质量指标与用量/成本报告。但**完整 Prompt 参数快照只在进程内缓存、重启后不可恢复**——`EvaluationRun.protocol_snapshot` 只保存脱敏的 `{version/hash/length}` 摘要，不落盘原始 Prompt 正文。
+
+## 统一运行报告（Run Detail）
+
+`GET /api/v1/evaluation/runs/:run_id/report` 返回该次运行的**四类结果**（`schema_version = evaluation-run-report/v1`）：检索质量、答案质量、成本、耗时，并附带用量、缓存、测量健康与可信状态。它是对已有持久化事实（`EvaluationRun`、run 级 `ModelCall` 聚合、Embedding Cache 聚合）的**只读投影**，不新建事实表、不重算指标或费用。
+
+每个 section 都带 `availability`（`AVAILABLE` / `PARTIAL` / `UNKNOWN` / `NOT_FINAL` / `UNSUPPORTED` / `DISABLED`）与非 `AVAILABLE` 时的稳定 `reason_code`。关键诚实性约束：
+
+- `null` / 缺省不会被当成 `0`；未知成本不会显示为 `¥0` / `$0`；
+- 成本是**估算**（`is_estimate=true`），已知小计只来自历史已知价格；混合币种不会被加总；
+- 耗时只等于 `ended_at - started_at` 的评测墙钟时间，不冒充 Provider latency；
+- `quality.metrics_valid=false` 时不返回看似有效的零分；
+- 租户级计量健康（`tenant_window_health`）按「租户 + 时间窗」统计，**不代表该 Run 的计量完整性**。
+
+页面 `/platform/evaluations/:runId` 只消费该 API，不在前端重算成本、缓存分母或质量指标。运行中（`RUNNING` / `PENDING`）会自动刷新，进入终态后停止；快速切换两个 runId 时迟到的旧响应不会覆盖新页面。
 
 ## 实现参考
 
@@ -268,9 +285,12 @@ type QAPair struct {
 | --- | --- |
 | HTTP Handler | `internal/handler/evaluation.go` |
 | 评估服务 | `internal/application/service/evaluation.go` |
+| 运行报告只读模型 | `internal/application/service/evaluation_report.go`、`internal/types/evaluation_report.go` |
+| 运行持久化事实 | `internal/types/evaluation_run.go`、`internal/application/repository/evaluation_run.go` |
 | 指标注册与汇聚 | `internal/application/service/metric_hook.go` |
 | 指标实现 | `internal/application/service/metric/`（`precision.go`、`recall.go`、`ndcg.go`、`mrr.go`、`map.go`、`bleu.go`、`rouge.go`、`rouge_score.go`、`common.go`） |
 | 数据集加载 | `internal/application/service/dataset.go`、`internal/handler/dataset.go` |
 | 类型定义 | `internal/types/evaluation.go`、`internal/types/dataset.go` |
 | 内置样例数据集 | `dataset/samples/`（Parquet 文件） |
-| 路由注册 | `internal/router/router.go` 的 `RegisterEvaluationRoutes` |
+| 路由注册 | `internal/router/routes_infra.go` 的 `RegisterEvaluationRoutes` |
+| 前端运行详情页 | `frontend/src/views/evaluation/`（`EvaluationRunDetail.vue`、`EvaluationRunLookup.vue`）、`frontend/src/api/evaluation.ts` |

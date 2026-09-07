@@ -127,6 +127,7 @@ func mapRunToDetail(run *types.EvaluationRun) *types.EvaluationDetail {
 	detail := &types.EvaluationDetail{
 		Task: &types.EvaluationTask{
 			ID:       run.TaskID,
+			RunID:    run.RunID,
 			TenantID: run.TenantID,
 			Status:   mapRunStatusToLegacy(run.Status),
 		},
@@ -293,6 +294,10 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 	taskID := detail.Task.ID
 	runID := uuid.NewString()
 	resourceKey := runID
+
+	// Expose the stable run identity additively on the legacy POST response so
+	// callers can resolve the run-level report without parsing the legacy task_id.
+	detail.Task.RunID = runID
 
 	// Build protocol + provenance snapshots.
 	protocolJSON, protocolHash, err := buildProtocolSnapshot(protocolSnapshotInput{

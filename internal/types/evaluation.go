@@ -40,6 +40,7 @@ const (
 // EvaluationTask contains information about an evaluation task
 type EvaluationTask struct {
 	ID        string `json:"id"`         // Unique task ID
+	RunID     string `json:"run_id"`     // Stable run ID (UUID) for the run-level report
 	TenantID  uint64 `json:"tenant_id"`  // Tenant/Organization ID
 	DatasetID string `json:"dataset_id"` // Dataset ID for evaluation
 
