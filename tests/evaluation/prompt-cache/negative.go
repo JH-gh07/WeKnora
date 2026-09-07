@@ -37,11 +37,26 @@ func runNegativeMatrix() []negCheck {
 
 	// N02: cache unreported -> NULL, not 0.
 	{
-		r := sanitizedRow{CacheStatus: "unreported", IncludedInPrimary: true, UsageFinality: "REPORTED"}
-		if ratio(r) != nil {
-			rec("N02", "cache unreported", "ratio=NULL, not shown as 0", "ratio computed despite unreported", false)
+		base := sanitizedRow{
+			ExperimentID: "negative", ProtocolHash: strings.Repeat("ab", 32), SampleID: "n02",
+			Provider: "siliconflow", ModelExact: "Qwen/Qwen3-14B", IncludedInPrimary: true,
+			UsageFinality: "REPORTED", CacheReportedInput: 100, InputTokens: 100,
+			SchemaFormatPass: true, SummaryLinePass: true, ValidLinkPass: true,
+		}
+		ctrl := base
+		ctrl.Arm = "control"
+		ctrl.CacheStatus = "unreported"
+		treat := base
+		treat.Arm = "treatment"
+		treat.CacheStatus = "miss"
+		treat.CacheMissTokens = 100
+		got, err := Aggregate([]sanitizedRow{ctrl, treat})
+		if ratio(ctrl) != nil {
+			rec("N02", "cache unreported", "ratio=NULL and coverage<1", "ratio computed despite unreported", false)
+		} else if err != nil || got.ControlReportingCoverage != 0 || got.ReportingCompletenessPass || got.PrimaryEffect != "INCONCLUSIVE_TELEMETRY" {
+			rec("N02", "cache unreported", "ratio=NULL and coverage<1", fmt.Sprintf("fail-closed aggregation mismatch: result=%+v err=%v", got, err), false)
 		} else {
-			rec("N02", "cache unreported", "ratio=NULL, not shown as 0", "unreported yields NULL ratio", true)
+			rec("N02", "cache unreported", "ratio=NULL and coverage<1", "unreported yields NULL ratio and incomplete coverage", true)
 		}
 	}
 

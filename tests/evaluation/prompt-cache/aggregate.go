@@ -147,11 +147,31 @@ func percentile(sorted []int, p float64) int {
 // Aggregate consumes sanitized rows and returns the deterministic verdict.
 func Aggregate(rows []sanitizedRow) (*AggregateResult, error) {
 	res := &AggregateResult{Conservation: "PASS", QualityGate: "PASS", ExcludedPairs: map[string]string{}}
+	type armAgg struct {
+		reported, eligible int
+		read, denom        int
+		latencies          []int
+		rows               []sanitizedRow
+	}
+	agg := map[string]*armAgg{"control": {}, "treatment": {}}
 
 	bySample := map[string]map[string]sanitizedRow{}
 	for _, r := range rows {
 		if r.Warmup {
 			continue
+		}
+		a, knownArm := agg[r.Arm]
+		if !knownArm {
+			res.MeasurementAnomalies = append(res.MeasurementAnomalies, fmt.Sprintf("%s: unknown arm %q", r.SampleID, r.Arm))
+			continue
+		}
+		// Coverage is measured over every planned, non-warmup logical call,
+		// including calls later excluded from the primary effect. Otherwise a
+		// failed or unreported call disappears from both numerator and
+		// denominator and can incorrectly preserve 100% coverage.
+		a.eligible++
+		if r.UsageFinality == "REPORTED" && r.CacheStatus != "unsupported" && r.CacheStatus != "unreported" {
+			a.reported++
 		}
 		if !r.IncludedInPrimary {
 			if r.ExclusionReason != "" {
@@ -179,13 +199,6 @@ func Aggregate(rows []sanitizedRow) (*AggregateResult, error) {
 		}
 	}
 
-	type armAgg struct {
-		reported, eligible int
-		read, denom        int
-		latencies          []int
-		rows               []sanitizedRow
-	}
-	agg := map[string]*armAgg{"control": {}, "treatment": {}}
 	var pairDeltas []float64
 
 	sampleIDs := make([]string, 0, len(bySample))
@@ -205,8 +218,6 @@ func Aggregate(rows []sanitizedRow) (*AggregateResult, error) {
 		res.ValidPairs++
 		for _, r := range []sanitizedRow{ctrl, treat} {
 			a := agg[r.Arm]
-			a.eligible++
-			a.reported++
 			a.read += r.CacheReadTokens
 			a.denom += r.CacheReportedInput
 			a.latencies = append(a.latencies, r.RequestElapsedMS)
