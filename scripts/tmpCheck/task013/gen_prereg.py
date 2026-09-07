@@ -125,6 +125,7 @@ def emit_yaml():
         "",
         "provenance_template:",
         "  experiment_id: task013-main-v1",
+        "  transport: harness_raw_http_boundary (authority run; production SDK non-stream gap remains a Step 4 candidate)",
         "  git_commit: TO_BE_FILLED_AT_RUN",
         "  git_tree: TO_BE_FILLED_AT_RUN",
         "  dirty_patch_hash: TO_BE_FILLED_AT_RUN",
