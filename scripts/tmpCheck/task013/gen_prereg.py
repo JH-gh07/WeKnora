@@ -150,11 +150,15 @@ def main():
         f.write(json_text)
     with open(sha_path, "w", encoding="utf-8") as f:
         f.write(hashlib.sha256(yaml_text.encode("utf-8")).hexdigest() + "\n")
+    ph_path = os.path.join(EVID, "experiment_preregistration.protocol_hash")
+    with open(ph_path, "w", encoding="utf-8") as f:
+        f.write(PROTOCOL_HASH + "\n")
     print("yaml_sha256   =", hashlib.sha256(yaml_text.encode("utf-8")).hexdigest())
     print("protocol_hash =", PROTOCOL_HASH)
     print("wrote:", yaml_path)
     print("wrote:", json_path)
     print("wrote:", sha_path)
+    print("wrote:", ph_path)
 
 
 if __name__ == "__main__":

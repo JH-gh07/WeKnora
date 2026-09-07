@@ -417,18 +417,20 @@ func parseRows(data []byte) ([]sanitizedRow, error) {
 		return nil, fmt.Errorf("sanitized TSV missing header")
 	}
 	header := strings.Split(lines[0], "\t")
-	col := func(h []string, name string) int {
-		for i, c := range h {
+	col := func(name string) int {
+		for i, c := range header {
 			if c == name {
 				return i
 			}
 		}
 		return -1
 	}
-	req := []string{"sample_id", "arm", "cache_status", "cache_read_tokens", "cache_miss_tokens", "cache_reported_input_tokens", "usage_finality", "included_in_primary"}
+	required := []string{"experiment_id", "protocol_hash", "sample_id", "arm", "warmup", "provider", "model_exact",
+		"input_tokens", "cache_read_tokens", "cache_miss_tokens", "cache_reported_input_tokens",
+		"cache_status", "usage_finality", "included_in_primary"}
 	idxs := map[string]int{}
-	for _, name := range req {
-		i := col(header, name)
+	for _, name := range required {
+		i := col(name)
 		if i < 0 {
 			return nil, fmt.Errorf("sanitized TSV missing column %q", name)
 		}
@@ -438,8 +440,32 @@ func parseRows(data []byte) ([]sanitizedRow, error) {
 		v, _ := strconv.Atoi(strings.TrimSpace(s))
 		return v
 	}
+	atof := func(s string) float64 {
+		v, _ := strconv.ParseFloat(strings.TrimSpace(s), 64)
+		return v
+	}
 	atob := func(s string) bool {
 		return strings.TrimSpace(s) == "true"
+	}
+	ati64p := func(s string) *int64 {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return nil
+		}
+		v, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			return nil
+		}
+		return &v
+	}
+	get := func(fields []string, name string) string {
+		if i, ok := idxs[name]; ok && i < len(fields) {
+			return fields[i]
+		}
+		if i := col(name); i >= 0 && i < len(fields) {
+			return fields[i]
+		}
+		return ""
 	}
 	var rows []sanitizedRow
 	for _, line := range lines[1:] {
@@ -447,21 +473,39 @@ func parseRows(data []byte) ([]sanitizedRow, error) {
 			continue
 		}
 		f := strings.Split(line, "\t")
-		get := func(name string) string {
-			if i, ok := idxs[name]; ok && i < len(f) {
-				return f[i]
-			}
-			return ""
-		}
 		rows = append(rows, sanitizedRow{
-			SampleID:           get("sample_id"),
-			Arm:                get("arm"),
-			CacheStatus:        get("cache_status"),
-			CacheReadTokens:    atoi(get("cache_read_tokens")),
-			CacheMissTokens:    atoi(get("cache_miss_tokens")),
-			CacheReportedInput: atoi(get("cache_reported_input_tokens")),
-			UsageFinality:      get("usage_finality"),
-			IncludedInPrimary:  atob(get("included_in_primary")),
+			ExperimentID:          get(f, "experiment_id"),
+			ProtocolHash:          get(f, "protocol_hash"),
+			SampleID:              get(f, "sample_id"),
+			Arm:                   get(f, "arm"),
+			Ordinal:               atoi(get(f, "ordinal")),
+			Warmup:                atob(get(f, "warmup")),
+			LogicalCallID:         get(f, "logical_call_id"),
+			TraceIDHash:           get(f, "trace_id_hash"),
+			Provider:              get(f, "provider"),
+			ModelExact:            get(f, "model_exact"),
+			ReportedModelRevision: get(f, "reported_model_revision"),
+			InputTokens:           atoi(get(f, "input_tokens")),
+			OutputTokens:          atoi(get(f, "output_tokens")),
+			CacheReadTokens:       atoi(get(f, "cache_read_tokens")),
+			CacheMissTokens:       atoi(get(f, "cache_miss_tokens")),
+			CacheReportedInput:    atoi(get(f, "cache_reported_input_tokens")),
+			CacheStatus:           get(f, "cache_status"),
+			UsageFinality:         get(f, "usage_finality"),
+			RequestElapsedMS:      atoi(get(f, "request_elapsed_ms")),
+			PricingRuleID:         get(f, "pricing_rule_id"),
+			EstimatedCostNanos:    ati64p(get(f, "estimated_cost_nanos_nullable")),
+			Currency:              get(f, "currency_nullable"),
+			SchemaFormatPass:      atob(get(f, "schema_format_pass")),
+			SummaryLinePass:       atob(get(f, "summary_line_pass")),
+			ForbiddenHandles:      atoi(get(f, "forbidden_internal_handle_count")),
+			RequiredFactRecall:    atof(get(f, "required_fact_recall")),
+			UnsupportedFactCount:  atoi(get(f, "unsupported_fact_count")),
+			ValidLinkPass:         atob(get(f, "valid_link_pass")),
+			SourceGroundingPass:   atob(get(f, "source_grounding_pass")),
+			ErrorType:             get(f, "error_type"),
+			IncludedInPrimary:     atob(get(f, "included_in_primary")),
+			ExclusionReason:       get(f, "exclusion_reason"),
 		})
 	}
 	return rows, nil

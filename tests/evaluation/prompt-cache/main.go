@@ -330,21 +330,52 @@ func main() {
 		err = runAggregate(dir, golden, repro3)
 	case "live":
 		allow := false
+		kind := ""
 		for _, a := range os.Args[2:] {
-			if a == "--allow-provider" {
+			switch a {
+			case "--allow-provider":
 				allow = true
+			case "pilot", "main":
+				kind = a
 			}
 		}
 		if !allow {
 			fmt.Println("SKIP_WITH_REASON: live mode requires explicit --allow-provider")
 			os.Exit(3)
 		}
-		if os.Getenv("SF_API_KEY") == "" {
-			fmt.Println("ERROR: SF_API_KEY credential not provided in environment")
+		if dir == "" {
+			fmt.Fprintln(os.Stderr, "TASK013_EVIDENCE_DIR not set")
 			os.Exit(4)
 		}
-		fmt.Println("ERROR: live runner not implemented until experiment preregistration is frozen and data scope approved")
-		os.Exit(4)
+		key, err := resolveCredential()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ERROR:", err)
+			os.Exit(4)
+		}
+		protoHash, err := loadProtocolHash(dir)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ERROR:", err)
+			os.Exit(4)
+		}
+		cfg := liveConfig{
+			apiKey:       key,
+			evidenceDir:  dir,
+			budgetNanos:  int64(10_000_000_000), // CNY 10.00 Owner-approved
+			protocolHash: protoHash,
+			experimentID: "task013-main-v1",
+		}
+		if kind == "pilot" {
+			err = runPilot(cfg)
+		} else if kind == "main" {
+			err = runMain(cfg)
+		} else {
+			fmt.Fprintln(os.Stderr, "live requires a run kind: pilot | main")
+			os.Exit(4)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(4)
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n", cmd)
 		os.Exit(4)
