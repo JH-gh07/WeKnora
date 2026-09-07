@@ -84,7 +84,7 @@ func verifyPrereg(dir string) (map[string]any, error) {
 		return nil, err
 	}
 	sum := sha256.Sum256(yamlBytes)
-	if strings.TrimSpace(string(shaBytes)) != hex.EncodeToString(sum[:]) {
+	if strings.Fields(string(shaBytes))[0] != hex.EncodeToString(sum[:]) {
 		return nil, fmt.Errorf("preregistration sha256 mismatch")
 	}
 	protoBytes, err := os.ReadFile(filepath.Join(dir, "experiment_preregistration_protocol.json"))
@@ -110,7 +110,6 @@ func verifyPrereg(dir string) (map[string]any, error) {
 		{"fixture_manifest_hash", "fixture_manifest.json"},
 		{"semantic_section_contract_hash", "semantic_section_contract.json"},
 		{"quality_contract_hash", "quality_contract.yaml"},
-		{"evaluator_artifact_hash", "evaluator_manifest.json"},
 	} {
 		if err := expect(kv[0], kv[1]); err != nil {
 			return nil, err
@@ -134,6 +133,14 @@ func verifyPrereg(dir string) (map[string]any, error) {
 	}
 	if want, _ := proto["evaluator_artifact_hash"].(string); want != evManifest.EvaluatorArtifactHash {
 		return nil, fmt.Errorf("evaluator artifact hash mismatch between prereg and manifest")
+	}
+	// The evaluator hash must also match the actual validator source file.
+	valSum, err := sha256File(filepath.Join("tests", "evaluation", "prompt-cache", "validator.go"))
+	if err != nil {
+		return nil, fmt.Errorf("validator.go unreadable: %w", err)
+	}
+	if evManifest.EvaluatorArtifactHash != valSum {
+		return nil, fmt.Errorf("evaluator artifact hash mismatch: manifest %s != validator.go %s", evManifest.EvaluatorArtifactHash, valSum)
 	}
 	return proto, nil
 }
@@ -454,7 +461,7 @@ func runPilot(cfg liveConfig) error {
 		return fmt.Errorf("probe preregistration sha missing: %w", err)
 	}
 	probeSum := sha256.Sum256(probeYAML)
-	if strings.TrimSpace(string(probeSHA)) != hex.EncodeToString(probeSum[:]) {
+	if strings.Fields(string(probeSHA))[0] != hex.EncodeToString(probeSum[:]) {
 		return fmt.Errorf("probe preregistration sha256 mismatch")
 	}
 	pilot := fixtures.PilotPair()
