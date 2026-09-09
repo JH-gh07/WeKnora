@@ -55,18 +55,19 @@ func TestSQLiteMigrationsModelCallsRepeatAndDown(t *testing.T) {
 	latest, dirty, err := m.Version()
 	require.NoError(t, err)
 	require.False(t, dirty)
-	require.Equal(t, uint(17), latest, "SQLite migration set must include the pricing snapshot migration")
+	require.Equal(t, uint(18), latest, "SQLite migration set must include the item/attempt migration")
 
 	// Repeat up is a no-op, not an error.
 	require.ErrorIs(t, m.Up(), migrate.ErrNoChange)
 
-	// One step down drops the pricing snapshot migration (000017). The
-	// model_calls facts and earlier additive columns survive.
-	require.NoError(t, m.Steps(-1))
+	// Two steps down drop the item/attempt migration (000018) and the pricing
+	// snapshot migration (000017). The model_calls facts and earlier additive
+	// columns survive.
+	require.NoError(t, m.Steps(-2))
 	downVersion, dirty, err := m.Version()
 	require.NoError(t, err)
 	require.False(t, dirty)
-	require.Equal(t, latest-1, downVersion)
+	require.Equal(t, latest-2, downVersion)
 	require.True(t, taskSQLiteTableExists(t, dbPath, "model_calls"), "down must preserve model_calls")
 	require.False(t, taskSQLiteColumnExists(t, dbPath, "model_calls", "pricing_status"), "down must remove the pricing snapshot columns")
 	require.False(t, taskSQLiteColumnExists(t, dbPath, "model_calls", "estimated_cost_nanos"), "down must remove estimated_cost_nanos")

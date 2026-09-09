@@ -71,13 +71,13 @@ func TestSQLiteMigrationsEmbeddingCacheRepeatAndDown(t *testing.T) {
 	latest, dirty, err := m.Version()
 	require.NoError(t, err)
 	require.False(t, dirty)
-	require.Equal(t, uint(17), latest, "SQLite migration set must include the pricing snapshot migration")
+	require.Equal(t, uint(18), latest, "SQLite migration set must include the item/attempt migration")
 
 	require.ErrorIs(t, m.Up(), migrate.ErrNoChange)
 
-	// Two steps down (pricing snapshot 000017, then embedding cache 000016)
-	// removes the cache tables while preserving model_calls.
-	require.NoError(t, m.Steps(-2))
+	// Three steps down (item/attempt 000018, pricing snapshot 000017, then
+	// embedding cache 000016) removes the cache tables while preserving model_calls.
+	require.NoError(t, m.Steps(-3))
 	require.True(t, taskSQLiteTableExists(t, dbPath, "model_calls"), "down must preserve model_calls")
 	require.False(t, taskSQLiteTableExists(t, dbPath, "embedding_cache_entries"), "down must drop entries")
 	require.False(t, taskSQLiteTableExists(t, dbPath, "embedding_cache_observations"), "down must drop observations")

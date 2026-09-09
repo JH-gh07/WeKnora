@@ -182,6 +182,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewTaskPendingOpsRepository))
 	must(container.Provide(repository.NewTaskDeadLetterRepository))
 	must(container.Provide(repository.NewEvaluationRunRepository))
+	must(container.Provide(repository.NewEvaluationRunItemRepository))
 	must(container.Provide(repository.NewTemporaryKnowledgeBaseFinder))
 	must(container.Provide(repository.NewModelCallRepository))
 	must(container.Provide(repository.NewEmbeddingCacheRepository))

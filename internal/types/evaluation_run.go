@@ -14,6 +14,7 @@ const (
 	EvaluationRunStatusPending     EvaluationRunStatus = "PENDING"
 	EvaluationRunStatusRunning     EvaluationRunStatus = "RUNNING"
 	EvaluationRunStatusCompleted   EvaluationRunStatus = "COMPLETED"
+	EvaluationRunStatusPartial     EvaluationRunStatus = "PARTIAL"
 	EvaluationRunStatusFailed      EvaluationRunStatus = "FAILED"
 	EvaluationRunStatusInterrupted EvaluationRunStatus = "INTERRUPTED"
 )
@@ -146,6 +147,7 @@ func (r *EvaluationRun) BeforeCreate(_ *gorm.DB) error {
 // IsTerminal reports whether the run is in a terminal state.
 func (r *EvaluationRun) IsTerminal() bool {
 	return r.Status == EvaluationRunStatusCompleted ||
+		r.Status == EvaluationRunStatusPartial ||
 		r.Status == EvaluationRunStatusFailed ||
 		r.Status == EvaluationRunStatusInterrupted
 }
