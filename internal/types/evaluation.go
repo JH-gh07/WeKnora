@@ -80,15 +80,33 @@ type MetricResult struct {
 	GenerationMetrics GenerationMetrics `json:"generation_metrics"` // Text generation quality metrics
 }
 
-// RetrievalMetrics contains metrics for retrieval evaluation
+// RetrievalMetrics contains metrics for retrieval evaluation (LEGACY semantics).
+// The legacy Precision and MAP use non-standard formulas, so their JSON field
+// names are explicitly prefixed legacy_nonstandard_ (Decision 016-4, AC07). They
+// MUST NOT share field names with the standard metrics (StandardRetrievalMetrics)
+// and are excluded from any blocking comparison. They remain readable here for
+// backwards compatibility.
 type RetrievalMetrics struct {
-	Precision float64 `json:"precision"` // Precision score
-	Recall    float64 `json:"recall"`    // Recall score
+	Precision float64 `json:"legacy_nonstandard_precision"` // Legacy precision score
+	Recall    float64 `json:"recall"`                       // Recall score
 
-	NDCG3  float64 `json:"ndcg3"`  // Normalized Discounted Cumulative Gain at 3
-	NDCG10 float64 `json:"ndcg10"` // Normalized Discounted Cumulative Gain at 10
-	MRR    float64 `json:"mrr"`    // Mean Reciprocal Rank
-	MAP    float64 `json:"map"`    // Mean Average Precision
+	NDCG3  float64 `json:"ndcg3"`                  // Normalized Discounted Cumulative Gain at 3
+	NDCG10 float64 `json:"ndcg10"`                 // Normalized Discounted Cumulative Gain at 10
+	MRR    float64 `json:"mrr"`                    // Mean Reciprocal Rank
+	MAP    float64 `json:"legacy_nonstandard_map"` // Legacy mean average precision
+}
+
+// StandardRetrievalMetrics contains the standard measurement-contract/v1
+// retrieval metrics (Task016 Step 4). Field names are intentionally distinct
+// from the legacy RetrievalMetrics names so the two never collide (AC07).
+type StandardRetrievalMetrics struct {
+	PrecisionAt10 float64 `json:"precision_at_10"` // |retrieved@10 ∩ relevant| / 10
+	RecallAt10    float64 `json:"recall_at_10"`    // |retrieved@10 ∩ relevant| / |relevant|
+	MRR           float64 `json:"mrr"`             // mean reciprocal rank (top-10)
+	AP            float64 `json:"ap"`              // average precision (full list)
+	MAP           float64 `json:"map"`             // mean average precision
+	NDCGAt3       float64 `json:"ndcg_at_3"`       // nDCG@3
+	NDCGAt10      float64 `json:"ndcg_at_10"`      // nDCG@10
 }
 
 // GenerationMetrics contains metrics for text generation evaluation

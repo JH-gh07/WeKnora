@@ -118,9 +118,17 @@ type EvaluationRun struct {
 	TemporaryResourceKey string        `json:"temporary_resource_key" gorm:"column:temporary_resource_key;type:varchar(128);index"`
 	TemporaryKBID        string        `json:"temporary_kb_id" gorm:"column:temporary_kb_id;type:varchar(36)"`
 	CleanupStatus        CleanupStatus `json:"cleanup_status" gorm:"column:cleanup_status;type:varchar(16)"`
+	CleanupOwnerID       string        `json:"cleanup_owner_id" gorm:"column:cleanup_owner_id;type:varchar(64)"`
+	CleanupLeaseUntil    *time.Time    `json:"cleanup_lease_until" gorm:"column:cleanup_lease_until"`
+	CleanupFencingToken  int64         `json:"cleanup_fencing_token" gorm:"column:cleanup_fencing_token"`
 
 	// Measurement boundary. UNKNOWN until a later Task implements metering.
-	MeasurementStatus MeasurementStatus `json:"measurement_status" gorm:"column:measurement_status;type:varchar(16)"`
+	MeasurementStatus                MeasurementStatus `json:"measurement_status" gorm:"column:measurement_status;type:varchar(16)"`
+	ExpectedLogicalCalls             int64             `json:"expected_logical_calls" gorm:"column:expected_logical_calls"`
+	MeteringAttemptedCount           int64             `json:"metering_attempted_count" gorm:"column:metering_attempted_count"`
+	MeteringPersistedCount           int64             `json:"metering_persisted_count" gorm:"column:metering_persisted_count"`
+	MeteringFailedCount              int64             `json:"metering_failed_count" gorm:"column:metering_failed_count"`
+	UnobservableProviderAttemptCount int64             `json:"unobservable_provider_attempt_count" gorm:"column:unobservable_provider_attempt_count"`
 
 	// PersistenceStatus records whether all lifecycle-critical durable writes
 	// succeeded. PERSIST_FAILED means the DB fact may be incomplete (a terminal

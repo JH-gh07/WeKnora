@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -13,6 +14,22 @@ type fakeReconcileRunRepo struct {
 	interfaces.EvaluationRunRepository
 	running []*types.EvaluationRun
 	updated []*types.EvaluationRun
+}
+
+func (f *fakeReconcileRunRepo) ClaimCleanup(_ context.Context, _ uint64, _ string, _ string, _ time.Duration) (int64, error) {
+	return 1, nil
+}
+
+func (f *fakeReconcileRunRepo) UpdateCleanupStatusFenced(_ context.Context, tenantID uint64, runID, _ string, _ int64, status types.CleanupStatus, temporaryKBID string) error {
+	for _, run := range f.running {
+		if run != nil && run.TenantID == tenantID && run.RunID == runID {
+			run.CleanupStatus = status
+			run.TemporaryKBID = temporaryKBID
+			f.updated = append(f.updated, run)
+			return nil
+		}
+	}
+	return repository.ErrEvaluationRunNotFound
 }
 
 func (f *fakeReconcileRunRepo) ListReconciliationCandidates(_ context.Context) ([]*types.EvaluationRun, error) {

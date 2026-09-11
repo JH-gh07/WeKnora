@@ -319,6 +319,24 @@ func LLMCallScopeFromContext(ctx context.Context) (runID, taskID, traceID string
 	return
 }
 
+// WithEvaluationItemScope binds nested model calls to a durable evaluation
+// item. It carries an opaque stable ID only; no question or prompt text enters
+// context-derived metering facts.
+func WithEvaluationItemScope(ctx context.Context, itemID string) context.Context {
+	if strings.TrimSpace(itemID) == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, EvaluationItemIDContextKey, strings.TrimSpace(itemID))
+}
+
+func EvaluationItemScopeFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	itemID, _ := ctx.Value(EvaluationItemIDContextKey).(string)
+	return itemID
+}
+
 // LanguageFromContext extracts the language locale string from ctx (e.g. "zh-CN", "en-US").
 // Returns ("zh-CN", false) when the key is absent.
 func LanguageFromContext(ctx context.Context) (string, bool) {

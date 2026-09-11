@@ -39,6 +39,10 @@ func (s *modelUsageService) Health(ctx context.Context, tenantID uint64, from, t
 	return s.repo.GetMeasurementHealth(ctx, tenantID, from, to)
 }
 
+func (s *modelUsageService) RunHealth(ctx context.Context, tenantID uint64, runID string) (*types.MeasurementHealth, error) {
+	return s.repo.GetRunMeasurementHealth(ctx, tenantID, runID)
+}
+
 // localEmbeddingCache reports the additive local-cache fact alongside (never
 // merged into) the Prompt Cache fields. When the rollout switch is off it is
 // DISABLED — a real "implemented but off" state — never NOT_IMPLEMENTED, and

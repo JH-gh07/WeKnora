@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/application/service/metric"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -62,7 +64,7 @@ func completedRun() *types.EvaluationRun {
 		StartedAt:         &start,
 		EndedAt:           &end,
 		MetricsValid:      true,
-		MetricsJSON:       types.JSON(`{"retrieval_metrics":{"precision":0.5,"recall":0.6,"ndcg3":0.4,"ndcg10":0.5,"mrr":0.5,"map":0.5},"generation_metrics":{"bleu1":0.1,"bleu2":0.2,"bleu4":0.3,"rouge1":0.4,"rouge2":0.5,"rougel":0.6}}`),
+		MetricsJSON:       types.JSON(`{"retrieval_metrics":{"legacy_nonstandard_precision":0.5,"recall":0.6,"ndcg3":0.4,"ndcg10":0.5,"mrr":0.5,"legacy_nonstandard_map":0.5},"generation_metrics":{"bleu1":0.1,"bleu2":0.2,"bleu4":0.3,"rouge1":0.4,"rouge2":0.5,"rougel":0.6}}`),
 		MeasurementStatus: types.MeasurementStatusUnknown,
 		PersistenceStatus: types.PersistenceStatusPersisted,
 		CleanupStatus:     types.CleanupStatusDone,
@@ -144,7 +146,7 @@ func TestDeriveQualitySection(t *testing.T) {
 	})
 	t.Run("null metric values are UNKNOWN rather than fabricated zeroes", func(t *testing.T) {
 		run := completedRun()
-		run.MetricsJSON = types.JSON(`{"retrieval_metrics":{"precision":null,"recall":0.2,"ndcg3":0.3,"ndcg10":0.4,"mrr":0.5,"map":0.6},"generation_metrics":{"bleu1":0.1,"bleu2":0.2,"bleu4":0.3,"rouge1":0.4,"rouge2":0.5,"rougel":0.6}}`)
+		run.MetricsJSON = types.JSON(`{"retrieval_metrics":{"legacy_nonstandard_precision":null,"recall":0.2,"ndcg3":0.3,"ndcg10":0.4,"mrr":0.5,"legacy_nonstandard_map":0.6},"generation_metrics":{"bleu1":0.1,"bleu2":0.2,"bleu4":0.3,"rouge1":0.4,"rouge2":0.5,"rougel":0.6}}`)
 		q := deriveQualitySection(run)
 		if q.Availability != types.AvailabilityUnknown || q.ReasonCode != types.ReasonMetricsMalformed {
 			t.Fatalf("unexpected: %+v", q)
@@ -162,6 +164,57 @@ func TestDeriveQualitySection(t *testing.T) {
 			t.Fatalf("expected precision 0.5, got %v", q.Retrieval.Precision)
 		}
 	})
+}
+
+// ---- Task016 Step 1 containment ----------------------------------------
+
+func TestStep1ContainmentMeasurementContract(t *testing.T) {
+	run := completedRun()
+	// A protocol v1 snapshot with UNVERSIONED measurement contract.
+	run.ProtocolSnapshot = types.JSON(`{"schema_version":"evaluation_protocol/1","measurement_contract_status":"UNVERSIONED"}`)
+
+	svc := newReportService(run, &types.ModelUsageAggregate{LogicalCallCount: 0}, nil)
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
+	report, err := svc.GetRunReport(ctx, run.RunID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if report.Quality.MeasurementContractStatus != "UNVERSIONED" {
+		t.Fatalf("measurement_contract_status = %q, want UNVERSIONED", report.Quality.MeasurementContractStatus)
+	}
+	if len(report.Quality.LegacyMetricDefinitions) == 0 {
+		t.Fatalf("legacy metric definitions must be non-empty")
+	}
+	found := false
+	for _, w := range report.Warnings {
+		if w.ReasonCode == types.ReasonMeasurementContractVersion {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected NOT_COMPARABLE_MEASUREMENT_CONTRACT warning, got %+v", report.Warnings)
+	}
+}
+
+func TestStep1ContainmentLegacyMarkerAlwaysPresent(t *testing.T) {
+	run := completedRun()
+	run.Status = types.EvaluationRunStatusRunning // non-terminal path must still carry the marker
+	q := deriveQualitySection(run)
+	if len(q.LegacyMetricDefinitions) == 0 {
+		t.Fatalf("legacy marker must be present even on non-terminal runs")
+	}
+	hasPrecision, hasMap := false, false
+	for _, m := range q.LegacyMetricDefinitions {
+		if m == "legacy_nonstandard_precision" {
+			hasPrecision = true
+		}
+		if m == "legacy_nonstandard_map" {
+			hasMap = true
+		}
+	}
+	if !hasPrecision || !hasMap {
+		t.Fatalf("legacy marker must name legacy_nonstandard_precision and legacy_nonstandard_map, got %v", q.LegacyMetricDefinitions)
+	}
 }
 
 // ---- latency three states ----------------------------------------------
@@ -257,6 +310,9 @@ func TestGetRunReportFullComposition(t *testing.T) {
 		LogicalCallCount: 5, SuccessCount: 5,
 		KnownCostTotal: floatPtr(1.25), Currency: strPtr("CNY"),
 		CacheEligibleCount: 5, CacheReportedCount: 5,
+		MeasurementStatus:        types.MeasurementHealthComplete,
+		ExpectedLogicalCallCount: 5, MeteringAttemptedCount: 5, MeteringPersistedCount: 5,
+		UnobservableProviderAttemptCount: 5,
 		LocalEmbeddingCache: &types.EmbeddingCacheAggregate{
 			ImplementationStatus: types.EmbeddingCacheImplementationEnabled,
 			MeasurementStatus:    types.MeasurementHealthComplete,
@@ -282,13 +338,57 @@ func TestGetRunReportFullComposition(t *testing.T) {
 	if report.Cost.Availability != types.AvailabilityAvailable {
 		t.Fatalf("cost: %+v", report.Cost)
 	}
-	if !report.SupportingObservation.TenantWindowHealthIsNotRunScope {
-		t.Fatalf("tenant-window health must be explicitly marked not-run-scope")
+	if report.SupportingObservation.TenantWindowHealth != nil || report.SupportingObservation.TenantWindowHealthIsNotRunScope {
+		t.Fatalf("tenant-window health must not substitute for run scope")
 	}
-	if report.SupportingObservation.RunMeasurementStatus != string(types.MeasurementStatusUnknown) {
-		t.Fatalf("run measurement status must stay UNKNOWN")
+	if report.SupportingObservation.RunMeasurementStatus != string(types.MeasurementHealthComplete) || report.SupportingObservation.RunMeasurementHealth == nil {
+		t.Fatalf("run measurement health missing: %+v", report.SupportingObservation)
+	}
+	if report.SupportingObservation.RunMeasurementHealth.MeteringAttemptedCount != 5 || report.SupportingObservation.ProviderAttemptObservability != types.AttemptObservabilityUnobservable {
+		t.Fatalf("run-scoped counts/observability wrong: %+v", report.SupportingObservation)
 	}
 	if report.SupportingObservation.LocalEmbeddingCache == nil {
 		t.Fatalf("expected local embedding cache supporting fact")
+	}
+}
+
+// ---- Task016 Step 4: standard metrics + contract hash decode -------------
+
+func TestDeriveQualitySectionStandardMetricsPresent(t *testing.T) {
+	run := completedRun()
+	run.MetricsJSON = types.JSON(`{"retrieval_metrics":{"legacy_nonstandard_precision":0.5,"recall":0.6,"ndcg3":0.4,"ndcg10":0.5,"mrr":0.5,"legacy_nonstandard_map":0.5},"generation_metrics":{"bleu1":0.1,"bleu2":0.2,"bleu4":0.3,"rouge1":0.4,"rouge2":0.5,"rougel":0.6},"standard_retrieval_metrics":{"precision_at_10":0.5,"recall_at_10":0.6,"mrr":0.5,"ap":0.5,"map":0.5,"ndcg_at_3":0.4,"ndcg_at_10":0.5},"measurement_contract_hash":"` + metric.MeasurementContractHash() + `"}`)
+
+	q := deriveQualitySection(run)
+	if q.Availability != types.AvailabilityAvailable {
+		t.Fatalf("availability = %q", q.Availability)
+	}
+	if q.StandardRetrieval == nil {
+		t.Fatalf("standard_retrieval must be populated")
+	}
+	if q.StandardRetrieval.PrecisionAt10 != 0.5 || q.StandardRetrieval.NDCGAt10 != 0.5 {
+		t.Fatalf("standard retrieval = %+v", q.StandardRetrieval)
+	}
+	if q.MeasurementContractHash != metric.MeasurementContractHash() {
+		t.Fatalf("measurement_contract_hash = %q", q.MeasurementContractHash)
+	}
+}
+
+func TestDeriveQualitySectionLegacyOnlyHasNoStandard(t *testing.T) {
+	q := deriveQualitySection(completedRun())
+	if q.Availability != types.AvailabilityAvailable {
+		t.Fatalf("availability = %q", q.Availability)
+	}
+	if q.StandardRetrieval != nil {
+		t.Fatalf("legacy-only run must NOT fabricate standard metrics: %+v", q.StandardRetrieval)
+	}
+	if q.MeasurementContractHash != "" {
+		t.Fatalf("legacy-only run must have empty contract hash, got %q", q.MeasurementContractHash)
+	}
+}
+
+func TestDecodeStandardMetricsAbsentKeys(t *testing.T) {
+	std, hash := decodeStandardMetrics(json.RawMessage(`{"retrieval_metrics":{},"generation_metrics":{}}`))
+	if std != nil || hash != "" {
+		t.Fatalf("expected (nil, \"\"), got (%+v, %q)", std, hash)
 	}
 }

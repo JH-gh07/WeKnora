@@ -2,6 +2,7 @@ package interfaces
 
 import (
 	"context"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -76,4 +77,6 @@ type EvaluationRunRepository interface {
 	// temporary resource cleanup never completed. It spans tenants because the
 	// current baseline is a single worker that owns every run.
 	ListReconciliationCandidates(ctx context.Context) ([]*types.EvaluationRun, error)
+	ClaimCleanup(ctx context.Context, tenantID uint64, runID, ownerID string, leaseTTL time.Duration) (int64, error)
+	UpdateCleanupStatusFenced(ctx context.Context, tenantID uint64, runID, ownerID string, fencingToken int64, status types.CleanupStatus, temporaryKBID string) error
 }

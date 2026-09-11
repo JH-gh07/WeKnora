@@ -38,7 +38,15 @@ func newQueryCountEnv(t *testing.T) (*gorm.DB, *reportIntegrationEnv) {
 	if err := db.AutoMigrate(&types.EvaluationRun{}, &types.ModelCall{}, &types.EmbeddingCacheObservation{}); err != nil {
 		t.Fatalf("automigrate: %v", err)
 	}
-	if err := db.Exec(`CREATE TABLE IF NOT EXISTS model_metering_health (id VARCHAR(36) PRIMARY KEY, tenant_id INTEGER NOT NULL, attempted_at DATETIME NOT NULL, persisted BOOLEAN NOT NULL)`).Error; err != nil {
+	if err := db.Exec(`CREATE TABLE IF NOT EXISTS model_metering_health (
+		id VARCHAR(36) PRIMARY KEY,
+		tenant_id INTEGER NOT NULL,
+		run_id VARCHAR(36),
+		item_id VARCHAR(36),
+		logical_call_id VARCHAR(36) NOT NULL DEFAULT '',
+		attempted_at DATETIME NOT NULL,
+		persisted BOOLEAN NOT NULL
+	)`).Error; err != nil {
 		t.Fatalf("create health table: %v", err)
 	}
 	runRepo := repository.NewEvaluationRunRepository(db)

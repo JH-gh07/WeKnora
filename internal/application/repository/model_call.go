@@ -48,6 +48,23 @@ func (r *modelCallRepository) CreateModelCall(ctx context.Context, call *types.M
 	return r.db.WithContext(ctx).Create(call).Error
 }
 
+func applyModelCallScope(ctx context.Context, call *types.ModelCall, logicalCallID string) {
+	if call == nil {
+		return
+	}
+	runID, _, _ := types.LLMCallScopeFromContext(ctx)
+	itemID := types.EvaluationItemScopeFromContext(ctx)
+	if call.RunID == nil && runID != "" {
+		call.RunID = &runID
+	}
+	if call.ItemID == nil && itemID != "" {
+		call.ItemID = &itemID
+	}
+	if call.LogicalCallID == "" {
+		call.LogicalCallID = logicalCallID
+	}
+}
+
 // BeginModelCall writes the durable "started, not yet persisted" health marker
 // before the provider round-trip. It returns the marker id used to finalize the
 // attempt in RecordModelCall. The write is detached from the business context.
@@ -59,11 +76,13 @@ func (r *modelCallRepository) BeginModelCall(ctx context.Context, tenantID uint6
 		at = time.Now().UTC()
 	}
 	id := uuid.NewString()
+	runID, _, _ := types.LLMCallScopeFromContext(ctx)
+	itemID := types.EvaluationItemScopeFromContext(ctx)
 	dctx, cancel := detachContext(ctx)
 	defer cancel()
 	err := r.db.WithContext(dctx).Exec(
-		`INSERT INTO model_metering_health (id, tenant_id, attempted_at, persisted) VALUES (?, ?, ?, ?)`,
-		id, tenantID, at.UTC(), false,
+		`INSERT INTO model_metering_health (id, tenant_id, run_id, item_id, logical_call_id, attempted_at, persisted) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		id, tenantID, nullableScope(runID), nullableScope(itemID), id, at.UTC(), false,
 	).Error
 	if err != nil {
 		return "", err
@@ -90,6 +109,7 @@ func (r *modelCallRepository) RecordModelCall(ctx context.Context, healthID stri
 	dctx, cancel := detachContext(ctx)
 	defer cancel()
 	if healthID != "" {
+		applyModelCallScope(ctx, call, healthID)
 		err := r.db.WithContext(dctx).Transaction(func(tx *gorm.DB) error {
 			txRepo := &modelCallRepository{db: tx}
 			if err := txRepo.CreateModelCall(dctx, call); err != nil {
@@ -105,12 +125,14 @@ func (r *modelCallRepository) RecordModelCall(ctx context.Context, healthID stri
 	}
 	// Fallback without a marker (DB was down at call start): one best-effort
 	// transaction, then a best-effort failed health event on failure.
+	logicalCallID := uuid.NewString()
+	applyModelCallScope(ctx, call, logicalCallID)
 	err := r.db.WithContext(dctx).Transaction(func(tx *gorm.DB) error {
 		txRepo := &modelCallRepository{db: tx}
 		if err := txRepo.CreateModelCall(dctx, call); err != nil {
 			return err
 		}
-		return txRepo.RecordMeteringAttempt(dctx, call.TenantID, at, true)
+		return txRepo.recordScopedMeteringAttempt(dctx, call.TenantID, call.RunID, call.ItemID, call.LogicalCallID, at, true)
 	})
 	if err != nil {
 		if healthErr := r.RecordMeteringAttempt(dctx, call.TenantID, at, false); healthErr != nil {
@@ -119,6 +141,13 @@ func (r *modelCallRepository) RecordModelCall(ctx context.Context, healthID stri
 		return err
 	}
 	return nil
+}
+
+func nullableScope(v string) interface{} {
+	if v == "" {
+		return nil
+	}
+	return v
 }
 
 // finalizeModelCallHealth transitions a started marker to its final persisted
@@ -248,11 +277,18 @@ func (r *modelCallRepository) AggregateModelCalls(ctx context.Context, filter ty
 	}
 	out.PricingUnknownReasonCounts = reasonCounts
 
-	health, err := r.GetMeasurementHealth(ctx, filter.TenantID, valueOrMin(filter.From), valueOrMax(filter.To))
+	var health *types.MeasurementHealth
+	if filter.RunID != nil && *filter.RunID != "" {
+		health, err = r.GetRunMeasurementHealth(ctx, filter.TenantID, *filter.RunID)
+	} else {
+		health, err = r.GetMeasurementHealth(ctx, filter.TenantID, valueOrMin(filter.From), valueOrMax(filter.To))
+	}
 	if err != nil {
 		return nil, err
 	}
 	out.MeteringAttemptedCount, out.MeteringPersistedCount, out.MeteringFailedCount = health.MeteringAttemptedCount, health.MeteringPersistedCount, health.MeteringFailedCount
+	out.ExpectedLogicalCallCount = health.ExpectedLogicalCallCount
+	out.UnobservableProviderAttemptCount = health.UnobservableProviderAttemptCount
 	out.MeasurementStatus = health.Status
 	return out, nil
 }
@@ -271,7 +307,11 @@ func valueOrMax(v *time.Time) time.Time {
 }
 
 func (r *modelCallRepository) RecordMeteringAttempt(ctx context.Context, tenantID uint64, at time.Time, persisted bool) error {
-	return r.db.WithContext(ctx).Exec(`INSERT INTO model_metering_health (id, tenant_id, attempted_at, persisted) VALUES (?, ?, ?, ?)`, uuid.NewString(), tenantID, at.UTC(), persisted).Error
+	return r.recordScopedMeteringAttempt(ctx, tenantID, nil, nil, "", at, persisted)
+}
+
+func (r *modelCallRepository) recordScopedMeteringAttempt(ctx context.Context, tenantID uint64, runID, itemID *string, logicalCallID string, at time.Time, persisted bool) error {
+	return r.db.WithContext(ctx).Exec(`INSERT INTO model_metering_health (id, tenant_id, run_id, item_id, logical_call_id, attempted_at, persisted) VALUES (?, ?, ?, ?, ?, ?, ?)`, uuid.NewString(), tenantID, runID, itemID, logicalCallID, at.UTC(), persisted).Error
 }
 
 func (r *modelCallRepository) GetMeasurementHealth(ctx context.Context, tenantID uint64, from, to time.Time) (*types.MeasurementHealth, error) {
@@ -287,5 +327,41 @@ func (r *modelCallRepository) GetMeasurementHealth(ctx context.Context, tenantID
 	if row.Attempted == 0 {
 		status = types.MeasurementHealthUnknown
 	}
-	return &types.MeasurementHealth{TenantID: tenantID, From: from, To: to, MeteringAttemptedCount: row.Attempted, MeteringPersistedCount: row.Persisted, MeteringFailedCount: row.Failed, Status: status}, nil
+	return &types.MeasurementHealth{TenantID: tenantID, From: from, To: to, ExpectedLogicalCallCount: row.Attempted, MeteringAttemptedCount: row.Attempted, MeteringPersistedCount: row.Persisted, MeteringFailedCount: row.Failed, Status: status}, nil
+}
+
+// GetRunMeasurementHealth computes completeness strictly from one tenant/run.
+// Overlapping tenant activity cannot affect this result (I11).
+func (r *modelCallRepository) GetRunMeasurementHealth(ctx context.Context, tenantID uint64, runID string) (*types.MeasurementHealth, error) {
+	out := &types.MeasurementHealth{TenantID: tenantID, RunID: runID, Status: types.MeasurementHealthUnknown}
+	if tenantID == 0 || runID == "" {
+		return out, nil
+	}
+	var row struct{ Attempted, Persisted, Failed int64 }
+	err := r.db.WithContext(ctx).Table("model_metering_health").
+		Select("COUNT(*) AS attempted, COALESCE(SUM(CASE WHEN persisted THEN 1 ELSE 0 END),0) AS persisted, COALESCE(SUM(CASE WHEN NOT persisted THEN 1 ELSE 0 END),0) AS failed").
+		Where("tenant_id = ? AND run_id = ?", tenantID, runID).Scan(&row).Error
+	if err != nil {
+		return nil, err
+	}
+	var unobservable int64
+	if err := r.db.WithContext(ctx).Model(&types.ModelCall{}).
+		Where("tenant_id = ? AND run_id = ? AND attempt_observability = ?", tenantID, runID, types.AttemptObservabilityUnobservable).
+		Count(&unobservable).Error; err != nil {
+		return nil, err
+	}
+	out.ExpectedLogicalCallCount = row.Attempted
+	out.MeteringAttemptedCount = row.Attempted
+	out.MeteringPersistedCount = row.Persisted
+	out.MeteringFailedCount = row.Failed
+	out.UnobservableProviderAttemptCount = unobservable
+	switch {
+	case row.Attempted == 0:
+		out.Status = types.MeasurementHealthUnknown
+	case row.Attempted != row.Persisted+row.Failed || row.Failed > 0:
+		out.Status = types.MeasurementHealthPartial
+	default:
+		out.Status = types.MeasurementHealthComplete
+	}
+	return out, nil
 }

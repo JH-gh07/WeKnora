@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -208,10 +209,32 @@ func runSkillPythonVerifier(t *testing.T, root string, scripts []string) (string
 		t.Skip("python3 is not on PATH")
 	}
 	cmd := exec.Command(python, append([]string{"-", root}, scripts...)...)
+	// The repository or temporary test root may contain non-ASCII path
+	// segments. Replace any inherited C locale instead of appending duplicates:
+	// macOS Python reads .pth files while importing site, before PYTHONUTF8 alone
+	// can make those paths decodable.
+	cmd.Env = utf8PythonEnv(os.Environ())
 	cmd.Stdin = strings.NewReader(skillPythonVerifier)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	runErr := cmd.Run()
 	return stdout.String(), stderr.String(), runErr
+}
+
+func utf8PythonEnv(in []string) []string {
+	out := make([]string, 0, len(in)+3)
+	for _, entry := range in {
+		key, _, _ := strings.Cut(entry, "=")
+		switch key {
+		case "LANG", "LC_ALL", "LC_CTYPE", "PYTHONUTF8":
+			continue
+		}
+		out = append(out, entry)
+	}
+	locale := "C.UTF-8"
+	if runtime.GOOS == "darwin" {
+		locale = "en_US.UTF-8"
+	}
+	return append(out, "LANG="+locale, "LC_ALL="+locale, "PYTHONUTF8=1")
 }

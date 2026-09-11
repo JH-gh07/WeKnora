@@ -21,10 +21,60 @@ func newModelCallTestDB(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(&types.ModelCall{}); err != nil {
 		t.Fatalf("migrate calls: %v", err)
 	}
-	if err := db.Exec(`CREATE TABLE model_metering_health (id VARCHAR(36) PRIMARY KEY, tenant_id INTEGER NOT NULL, attempted_at DATETIME NOT NULL, persisted BOOLEAN NOT NULL)`).Error; err != nil {
+	if err := db.Exec(`CREATE TABLE model_metering_health (id VARCHAR(36) PRIMARY KEY, tenant_id INTEGER NOT NULL, run_id VARCHAR(36), item_id VARCHAR(36), logical_call_id VARCHAR(36) NOT NULL DEFAULT '', attempted_at DATETIME NOT NULL, persisted BOOLEAN NOT NULL)`).Error; err != nil {
 		t.Fatalf("create health: %v", err)
 	}
 	return db
+}
+
+func TestModelCallRepositoryRunScopedHealthDoesNotMixOverlappingRuns(t *testing.T) {
+	db := newModelCallTestDB(t)
+	repo := NewModelCallRepository(db)
+	now := time.Now().UTC().Truncate(time.Second)
+
+	ctxA := types.WithLLMCallScope(context.Background(), "run-a", "task-a", "trace-a")
+	ctxA = types.WithEvaluationItemScope(ctxA, "item-a")
+	healthA, err := repo.BeginModelCall(ctxA, 7, now)
+	if err != nil {
+		t.Fatalf("begin run-a: %v", err)
+	}
+	callA := minimalModelCall(7, now)
+	if err := repo.RecordModelCall(ctxA, healthA, callA); err != nil {
+		t.Fatalf("record run-a: %v", err)
+	}
+
+	ctxB := types.WithLLMCallScope(context.Background(), "run-b", "task-b", "trace-b")
+	ctxB = types.WithEvaluationItemScope(ctxB, "item-b")
+	if _, err := repo.BeginModelCall(ctxB, 7, now); err != nil {
+		t.Fatalf("begin run-b: %v", err)
+	}
+
+	runA, err := repo.GetRunMeasurementHealth(context.Background(), 7, "run-a")
+	if err != nil {
+		t.Fatalf("health run-a: %v", err)
+	}
+	if runA.Status != types.MeasurementHealthComplete || runA.ExpectedLogicalCallCount != 1 || runA.MeteringAttemptedCount != 1 || runA.MeteringPersistedCount != 1 || runA.MeteringFailedCount != 0 || runA.UnobservableProviderAttemptCount != 1 {
+		t.Fatalf("run-a health = %+v", runA)
+	}
+	runB, err := repo.GetRunMeasurementHealth(context.Background(), 7, "run-b")
+	if err != nil {
+		t.Fatalf("health run-b: %v", err)
+	}
+	if runB.Status != types.MeasurementHealthPartial || runB.MeteringAttemptedCount != 1 || runB.MeteringPersistedCount != 0 || runB.MeteringFailedCount != 1 {
+		t.Fatalf("run-b health = %+v", runB)
+	}
+	wrongTenant, err := repo.GetRunMeasurementHealth(context.Background(), 8, "run-a")
+	if err != nil || wrongTenant.Status != types.MeasurementHealthUnknown || wrongTenant.MeteringAttemptedCount != 0 {
+		t.Fatalf("cross-tenant health = %+v, err=%v", wrongTenant, err)
+	}
+
+	stored, err := repo.GetModelCall(context.Background(), 7, callA.ID)
+	if err != nil {
+		t.Fatalf("get run-a call: %v", err)
+	}
+	if stored.RunID == nil || *stored.RunID != "run-a" || stored.ItemID == nil || *stored.ItemID != "item-a" || stored.LogicalCallID != healthA {
+		t.Fatalf("model call scope not persisted: %+v", stored)
+	}
 }
 
 func intPtr(v int) *int           { return &v }

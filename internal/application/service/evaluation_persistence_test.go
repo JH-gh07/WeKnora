@@ -96,6 +96,7 @@ func TestEvalDatasetCleansTemporaryKBOnIngestFailure(t *testing.T) {
 		knowledgeBaseService: kbSvc,
 		sessionService:       &fakeSessionService{},
 		runRepository:        runRepo,
+		itemRepository:       newFakeEvaluationItemRepository(),
 	}
 
 	run := &types.EvaluationRun{RunID: "run-1", TaskID: "task-1"}

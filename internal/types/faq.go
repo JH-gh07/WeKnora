@@ -57,6 +57,11 @@ type DocumentChunkMetadata struct {
 	GeneratedQuestions []GeneratedQuestion `json:"generated_questions,omitempty"`
 	// GeneratedQuestionsRevision ties the questions to Chunk.ContentRevision.
 	GeneratedQuestionsRevision int `json:"generated_questions_revision,omitempty"`
+	// SourcePassageID is the stable lineage identity of the passage this chunk
+	// was split from (Task016 Step 3, plan §4.2 方案 B). It rides on the chunk's
+	// existing metadata JSON column, so no schema migration is required. Empty
+	// means "no lineage" (legacy results).
+	SourcePassageID string `json:"source_passage_id,omitempty"`
 }
 
 // IsQuestionCurrent reports whether a generated question was authored for the
@@ -109,6 +114,39 @@ func (c *Chunk) SetDocumentMetadata(meta *DocumentChunkMetadata) error {
 	}
 	c.Metadata = JSON(bytes)
 	return nil
+}
+
+// SetSourcePassageID stores the stable lineage passage identity on the chunk's
+// metadata JSON column (Task016 Step 3, plan §4.2 方案 B). It preserves any
+// other metadata already present (e.g. generated questions) and round-trips
+// through the DB without requiring a schema migration.
+func (c *Chunk) SetSourcePassageID(passageID string) error {
+	if c == nil || passageID == "" {
+		return nil
+	}
+	meta, err := c.DocumentMetadata()
+	if err != nil {
+		return err
+	}
+	if meta == nil {
+		meta = &DocumentChunkMetadata{}
+	}
+	meta.SourcePassageID = passageID
+	return c.SetDocumentMetadata(meta)
+}
+
+// SourcePassageIDValue returns the stable lineage passage identity, or "" when
+// unset (legacy results). "" is the LINEAGE_UNAVAILABLE signal consumed by the
+// metric hook.
+func (c *Chunk) SourcePassageIDValue() string {
+	if c == nil {
+		return ""
+	}
+	meta, err := c.DocumentMetadata()
+	if err != nil || meta == nil {
+		return ""
+	}
+	return meta.SourcePassageID
 }
 
 // Sanitize 对元数据进行基础清理（去除首尾空白、去重），保留原始内容

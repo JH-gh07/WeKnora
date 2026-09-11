@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -123,7 +124,10 @@ func (s *knowledgeService) processDocumentFromPassage(ctx context.Context,
 		return
 	}
 
-	// Convert passages to chunks
+	// Convert passages to chunks. The slice index i is the stable passage
+	// identity (PID): getPassageList indexes the passage slice by PID, so each
+	// chunk inherits its parent passage ID verbatim (Task016 Step 3, plan §4.2
+	// 方案 B). This is the ONLY place evaluation lineage enters the pipeline.
 	chunks := make([]types.ParsedChunk, 0, len(passage))
 	start, end := 0, 0
 	for i, p := range passage {
@@ -132,10 +136,11 @@ func (s *knowledgeService) processDocumentFromPassage(ctx context.Context,
 		}
 		end += len([]rune(p))
 		chunks = append(chunks, types.ParsedChunk{
-			Content: p,
-			Seq:     i,
-			Start:   start,
-			End:     end,
+			Content:         p,
+			Seq:             i,
+			Start:           start,
+			End:             end,
+			SourcePassageID: strconv.Itoa(i),
 		})
 		start = end
 	}
@@ -431,6 +436,15 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		// Wire up ParentChunkID for child chunks
 		if hasParentChild && chunkData.ParentIndex >= 0 && chunkData.ParentIndex < len(parentDBChunks) {
 			textChunk.ParentChunkID = parentDBChunks[chunkData.ParentIndex].ID
+		}
+
+		// Carry the stable passage identity onto the persisted chunk metadata so
+		// search/rerank can propagate it verbatim (Task016 Step 3). Missing
+		// lineage stays empty => LINEAGE_UNAVAILABLE downstream, never guessed.
+		if chunkData.SourcePassageID != "" {
+			if err := textChunk.SetSourcePassageID(chunkData.SourcePassageID); err != nil {
+				logger.Warnf(ctx, "Failed to set source passage ID on chunk %s: %v", textChunk.ID, err)
+			}
 		}
 
 		chunks[idx].ChunkID = textChunk.ID

@@ -48,10 +48,21 @@ func (s *evaluationReportService) GetRunReport(ctx context.Context, runID string
 		Quality:       deriveQualitySection(run),
 		Latency:       deriveLatencySection(run),
 		SupportingObservation: types.ReportSupportingSection{
-			RunMeasurementStatus:            string(run.MeasurementStatus),
-			TenantWindowHealthIsNotRunScope: true,
+			RunMeasurementStatus: string(run.MeasurementStatus),
 		},
 		Warnings: make([]types.ReportWarning, 0),
+	}
+
+	// Task016 Step 1 containment: a protocol v1 snapshot whose measurement
+	// contract is UNVERSIONED (or absent) must be surfaced as NOT_COMPARABLE,
+	// never silently treated as blocking-comparable quality evidence.
+	if report.Quality.MeasurementContractStatus == "" ||
+		report.Quality.MeasurementContractStatus == measurementContractUnversioned {
+		report.Warnings = append(report.Warnings, types.ReportWarning{
+			ReasonCode: types.ReasonMeasurementContractVersion,
+			Section:    "quality",
+			Message:    "measurement contract is UNVERSIONED; quality numbers are NOT_COMPARABLE_MEASUREMENT_CONTRACT and must not enter a blocking comparison",
+		})
 	}
 
 	// Observation: run-scoped model usage + cost + cache.
@@ -78,17 +89,20 @@ func (s *evaluationReportService) GetRunReport(ctx context.Context, runID string
 	report.Cost = deriveCostSection(agg)
 	report.SupportingObservation.PromptCache = derivePromptCacheSupport(agg)
 	report.SupportingObservation.LocalEmbeddingCache = deriveLocalCacheSupport(agg)
-
-	// Observation: tenant-window metering health over the run's wall-clock
-	// window. This is explicitly NOT run-level completeness.
-	from, to := runWindow(run)
-	if health, herr := s.usageService.Health(ctx, tenantID, from, to); herr == nil {
-		report.SupportingObservation.TenantWindowHealth = deriveHealthSupport(health)
+	report.SupportingObservation.RunMeasurementStatus = string(agg.MeasurementStatus)
+	report.SupportingObservation.RunMeasurementHealth = deriveAggregateHealthSupport(runID, agg)
+	if agg.LogicalCallCount == 0 {
+		report.SupportingObservation.ProviderAttemptObservability = types.AttemptObservabilityUnobservable
+	} else if agg.UnobservableProviderAttemptCount > 0 {
+		report.SupportingObservation.ProviderAttemptObservability = types.AttemptObservabilityUnobservable
 	} else {
+		report.SupportingObservation.ProviderAttemptObservability = types.AttemptObservabilityFull
+	}
+	if agg.MeasurementStatus != types.MeasurementHealthComplete {
 		report.Warnings = append(report.Warnings, types.ReportWarning{
-			ReasonCode: types.ReasonRunMeasurementScopeUnavail,
+			ReasonCode: types.ReasonMeasurementIncomplete,
 			Section:    "supporting_observation",
-			Message:    "tenant window health unavailable",
+			Message:    "run-scoped logical-call measurement is not complete",
 		})
 	}
 
@@ -116,8 +130,37 @@ func deriveRunSection(run *types.EvaluationRun) types.ReportRunSection {
 	return s
 }
 
+// legacyMetricDefinitions lists the retrieval metric JSON field names whose
+// current implementation uses legacy (non-standard) semantics (Task016 Step 1).
+// They are advisory-only and never blocking. The names are explicitly prefixed
+// legacy_nonstandard_ so they cannot collide with standard metric names (AC07).
+var legacyMetricDefinitions = []string{"legacy_nonstandard_precision", "legacy_nonstandard_map"}
+
+// measurementContractStatus extracts the measurement_contract_status from the
+// secret-free protocol snapshot. Empty/missing/unparseable snapshots yield an
+// empty string, which is treated as not-comparable by the caller.
+func measurementContractStatus(snapshot types.JSON) string {
+	if len(snapshot) == 0 {
+		return ""
+	}
+	var proto struct {
+		MeasurementContractStatus string `json:"measurement_contract_status"`
+		MeasurementContractHash   string `json:"measurement_contract_hash"`
+	}
+	if err := json.Unmarshal(snapshot, &proto); err != nil {
+		return ""
+	}
+	if proto.MeasurementContractHash != "" {
+		return proto.MeasurementContractHash
+	}
+	return proto.MeasurementContractStatus
+}
+
 func deriveQualitySection(run *types.EvaluationRun) types.ReportQualitySection {
-	q := types.ReportQualitySection{}
+	q := types.ReportQualitySection{
+		MeasurementContractStatus: measurementContractStatus(run.ProtocolSnapshot),
+		LegacyMetricDefinitions:   legacyMetricDefinitions,
+	}
 	if !run.IsTerminal() {
 		q.Availability = types.AvailabilityNotFinal
 		q.ReasonCode = types.ReasonRunNotTerminal
@@ -144,7 +187,27 @@ func deriveQualitySection(run *types.EvaluationRun) types.ReportQualitySection {
 	q.MetricsValid = true
 	q.Retrieval = &metric.RetrievalMetrics
 	q.Answer = &metric.GenerationMetrics
+	// Standard measurement-contract/v1 metrics + the contract hash under which
+	// they were computed (Task016 Step 4). These are optional: older/legacy runs
+	// carry only the legacy result and so have a nil StandardRetrieval and empty
+	// MeasurementContractHash (never fabricated from the legacy numbers).
+	q.StandardRetrieval, q.MeasurementContractHash = decodeStandardMetrics(json.RawMessage(run.MetricsJSON))
 	return q
+}
+
+// decodeStandardMetrics extracts the optional standard retrieval metrics and the
+// measurement contract hash from the persisted MetricsJSON. A legacy/UNVERSIONED
+// run without these keys yields (nil, "") and must never have its legacy numbers
+// reinterpreted as standard (I04, AC08).
+func decodeStandardMetrics(raw json.RawMessage) (*types.StandardRetrievalMetrics, string) {
+	var top struct {
+		StandardRetrieval       *types.StandardRetrievalMetrics `json:"standard_retrieval_metrics"`
+		MeasurementContractHash string                          `json:"measurement_contract_hash"`
+	}
+	if err := json.Unmarshal(raw, &top); err != nil {
+		return nil, ""
+	}
+	return top.StandardRetrieval, top.MeasurementContractHash
 }
 
 func decodeCompleteMetricResult(raw json.RawMessage) (types.MetricResult, bool) {
@@ -154,7 +217,7 @@ func decodeCompleteMetricResult(raw json.RawMessage) (types.MetricResult, bool) 
 		return metric, false
 	}
 	required := map[string][]string{
-		"retrieval_metrics":  {"precision", "recall", "ndcg3", "ndcg10", "mrr", "map"},
+		"retrieval_metrics":  {"legacy_nonstandard_precision", "recall", "ndcg3", "ndcg10", "mrr", "legacy_nonstandard_map"},
 		"generation_metrics": {"bleu1", "bleu2", "bleu4", "rouge1", "rouge2", "rougel"},
 	}
 	for section, fields := range required {
@@ -293,12 +356,30 @@ func deriveHealthSupport(h *types.MeasurementHealth) *types.ReportMeasurementHea
 		return nil
 	}
 	return &types.ReportMeasurementHealth{
-		From:                   h.From.UTC().Format(time.RFC3339),
-		To:                     h.To.UTC().Format(time.RFC3339),
-		Status:                 string(h.Status),
-		MeteringAttemptedCount: h.MeteringAttemptedCount,
-		MeteringPersistedCount: h.MeteringPersistedCount,
-		MeteringFailedCount:    h.MeteringFailedCount,
+		RunID:                            h.RunID,
+		From:                             h.From.UTC().Format(time.RFC3339),
+		To:                               h.To.UTC().Format(time.RFC3339),
+		Status:                           string(h.Status),
+		MeteringAttemptedCount:           h.MeteringAttemptedCount,
+		MeteringPersistedCount:           h.MeteringPersistedCount,
+		MeteringFailedCount:              h.MeteringFailedCount,
+		ExpectedLogicalCallCount:         h.ExpectedLogicalCallCount,
+		UnobservableProviderAttemptCount: h.UnobservableProviderAttemptCount,
+	}
+}
+
+func deriveAggregateHealthSupport(runID string, agg *types.ModelUsageAggregate) *types.ReportMeasurementHealth {
+	if agg == nil {
+		return nil
+	}
+	return &types.ReportMeasurementHealth{
+		RunID:                            runID,
+		Status:                           string(agg.MeasurementStatus),
+		ExpectedLogicalCallCount:         agg.ExpectedLogicalCallCount,
+		MeteringAttemptedCount:           agg.MeteringAttemptedCount,
+		MeteringPersistedCount:           agg.MeteringPersistedCount,
+		MeteringFailedCount:              agg.MeteringFailedCount,
+		UnobservableProviderAttemptCount: agg.UnobservableProviderAttemptCount,
 	}
 }
 

@@ -5,10 +5,89 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
+
+type fakeEvaluationItemRepository struct {
+	interfaces.EvaluationRunItemRepository
+	mu    sync.Mutex
+	items map[string]*types.EvaluationRunItem
+}
+
+func newFakeEvaluationItemRepository() *fakeEvaluationItemRepository {
+	return &fakeEvaluationItemRepository{items: map[string]*types.EvaluationRunItem{}}
+}
+
+func (f *fakeEvaluationItemRepository) CreateItem(_ context.Context, item *types.EvaluationRunItem) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.items[item.ItemID]; ok {
+		return repository.ErrEvaluationItemDuplicate
+	}
+	copy := *item
+	f.items[item.ItemID] = &copy
+	return nil
+}
+
+func (f *fakeEvaluationItemRepository) ClaimNextItem(_ context.Context, tenantID uint64, runID, ownerID string, _ time.Duration) (*types.EvaluationRunItem, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, item := range f.items {
+		if item.TenantID == tenantID && item.RunID == runID && item.Status == types.EvaluationItemStatusPending {
+			item.Status = types.EvaluationItemStatusRunning
+			item.OwnerID = ownerID
+			item.FencingToken++
+			item.AttemptCount++
+			copy := *item
+			return &copy, nil
+		}
+	}
+	return nil, repository.ErrEvaluationItemNoClaimable
+}
+
+func (f *fakeEvaluationItemRepository) HeartbeatItem(_ context.Context, tenantID uint64, runID, itemID, ownerID string, token int64, _ time.Duration) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	item := f.items[itemID]
+	if item == nil || item.TenantID != tenantID || item.RunID != runID || item.OwnerID != ownerID || item.FencingToken != token {
+		return repository.ErrEvaluationItemFenced
+	}
+	return nil
+}
+
+func (f *fakeEvaluationItemRepository) CommitTerminalItem(_ context.Context, tenantID uint64, runID, itemID, ownerID string, token int64, status types.EvaluationItemStatus, result types.JSON, hash, reason string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	item := f.items[itemID]
+	if item == nil {
+		return repository.ErrEvaluationItemNotFound
+	}
+	if item.Status.IsTerminal() {
+		return repository.ErrEvaluationItemAlreadyTerminal
+	}
+	if item.TenantID != tenantID || item.RunID != runID || item.OwnerID != ownerID || item.FencingToken != token {
+		return repository.ErrEvaluationItemFenced
+	}
+	item.Status, item.ResultJSON, item.ResultArtifactHash, item.TerminalReason = status, result, hash, reason
+	return nil
+}
+
+func (f *fakeEvaluationItemRepository) ListItems(_ context.Context, tenantID uint64, runID string) ([]*types.EvaluationRunItem, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]*types.EvaluationRunItem, 0, len(f.items))
+	for _, item := range f.items {
+		if item.TenantID == tenantID && item.RunID == runID {
+			copy := *item
+			out = append(out, &copy)
+		}
+	}
+	return out, nil
+}
 
 // The fakes below embed the full interface and override only the methods that
 // EvalDataset actually calls. Embedding a nil interface supplies the remaining
@@ -73,6 +152,14 @@ func (f *fakeRunRepository) Update(_ context.Context, run *types.EvaluationRun) 
 	return nil
 }
 
+func (f *fakeRunRepository) ClaimCleanup(_ context.Context, _ uint64, _ string, _ string, _ time.Duration) (int64, error) {
+	return 1, nil
+}
+
+func (f *fakeRunRepository) UpdateCleanupStatusFenced(_ context.Context, _ uint64, _ string, _ string, _ int64, _ types.CleanupStatus, _ string) error {
+	return nil
+}
+
 func TestEvalDatasetConcurrentProgressHasNoDataRace(t *testing.T) {
 	// A deterministic fixture that exercises the full parallel QA loop under
 	// the race detector. It proves the shared-`err` closure and shared-`run`
@@ -96,6 +183,7 @@ func TestEvalDatasetConcurrentProgressHasNoDataRace(t *testing.T) {
 		knowledgeBaseService: &fakeKnowledgeBaseService{},
 		sessionService:       &fakeSessionService{},
 		runRepository:        runRepo,
+		itemRepository:       newFakeEvaluationItemRepository(),
 	}
 
 	run := &types.EvaluationRun{

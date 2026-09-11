@@ -7,13 +7,13 @@ import "time"
 type EvaluationItemStatus string
 
 const (
-	EvaluationItemStatusPending      EvaluationItemStatus = "PENDING"
-	EvaluationItemStatusRunning      EvaluationItemStatus = "RUNNING"
-	EvaluationItemStatusSucceeded    EvaluationItemStatus = "SUCCEEDED"
-	EvaluationItemStatusFailedTerm   EvaluationItemStatus = "FAILED_TERMINAL"
-	EvaluationItemStatusRetryWait    EvaluationItemStatus = "RETRY_WAIT"
-	EvaluationItemStatusReclaimable  EvaluationItemStatus = "RECLAIMABLE"
-	EvaluationItemStatusCancelled    EvaluationItemStatus = "CANCELLED"
+	EvaluationItemStatusPending     EvaluationItemStatus = "PENDING"
+	EvaluationItemStatusRunning     EvaluationItemStatus = "RUNNING"
+	EvaluationItemStatusSucceeded   EvaluationItemStatus = "SUCCEEDED"
+	EvaluationItemStatusFailedTerm  EvaluationItemStatus = "FAILED_TERMINAL"
+	EvaluationItemStatusRetryWait   EvaluationItemStatus = "RETRY_WAIT"
+	EvaluationItemStatusReclaimable EvaluationItemStatus = "RECLAIMABLE"
+	EvaluationItemStatusCancelled   EvaluationItemStatus = "CANCELLED"
 )
 
 // IsTerminal reports whether the item will never transition again. SUCCEEDED,
@@ -32,11 +32,11 @@ func (s EvaluationItemStatus) IsTerminal() bool {
 type EvaluationAttemptStatus string
 
 const (
-	EvaluationAttemptStatusRunning       EvaluationAttemptStatus = "RUNNING"
-	EvaluationAttemptStatusSucceeded     EvaluationAttemptStatus = "SUCCEEDED"
-	EvaluationAttemptStatusFailedTerm    EvaluationAttemptStatus = "FAILED_TERMINAL"
-	EvaluationAttemptStatusRetryWait     EvaluationAttemptStatus = "RETRY_WAIT"
-	EvaluationAttemptStatusCancelled     EvaluationAttemptStatus = "CANCELLED"
+	EvaluationAttemptStatusRunning    EvaluationAttemptStatus = "RUNNING"
+	EvaluationAttemptStatusSucceeded  EvaluationAttemptStatus = "SUCCEEDED"
+	EvaluationAttemptStatusFailedTerm EvaluationAttemptStatus = "FAILED_TERMINAL"
+	EvaluationAttemptStatusRetryWait  EvaluationAttemptStatus = "RETRY_WAIT"
+	EvaluationAttemptStatusCancelled  EvaluationAttemptStatus = "CANCELLED"
 )
 
 // EvaluationRunItem is the durable fact of one logical evaluation item: the

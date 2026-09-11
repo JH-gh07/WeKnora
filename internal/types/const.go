@@ -84,6 +84,8 @@ const (
 	LLMRunIDContextKey   ContextKey = "LLMRunID"
 	LLMTaskIDContextKey  ContextKey = "LLMTaskID"
 	LLMTraceIDContextKey ContextKey = "LLMTraceID"
+	// EvaluationItemIDContextKey binds nested model calls to one durable item.
+	EvaluationItemIDContextKey ContextKey = "EvaluationItemID"
 	// MCPOAuthNonInteractiveContextKey marks a request whose channel cannot
 	// resolve an in-conversation MCP OAuth prompt (e.g. an IM bot: there is no
 	// live client to click "Authorize" and call the resolve endpoint). When set,

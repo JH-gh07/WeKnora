@@ -4,6 +4,27 @@
 -- result per item (I07). The attempt table records every claim/execution with
 -- its owner, lease, fencing token and outcome (I08). Additive and reversible.
 
+ALTER TABLE evaluation_runs ADD COLUMN expected_logical_calls INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE evaluation_runs ADD COLUMN metering_attempted_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE evaluation_runs ADD COLUMN metering_persisted_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE evaluation_runs ADD COLUMN metering_failed_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE evaluation_runs ADD COLUMN unobservable_provider_attempt_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE evaluation_runs ADD COLUMN cleanup_owner_id VARCHAR(64) NOT NULL DEFAULT '';
+ALTER TABLE evaluation_runs ADD COLUMN cleanup_lease_until DATETIME;
+ALTER TABLE evaluation_runs ADD COLUMN cleanup_fencing_token INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE model_calls ADD COLUMN item_id VARCHAR(36);
+ALTER TABLE model_calls ADD COLUMN logical_call_id VARCHAR(36) NOT NULL DEFAULT '';
+ALTER TABLE model_metering_health ADD COLUMN run_id VARCHAR(36);
+ALTER TABLE model_metering_health ADD COLUMN item_id VARCHAR(36);
+ALTER TABLE model_metering_health ADD COLUMN logical_call_id VARCHAR(36) NOT NULL DEFAULT '';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_model_calls_run_logical_call
+    ON model_calls (tenant_id, run_id, logical_call_id)
+    WHERE run_id IS NOT NULL AND logical_call_id <> '';
+CREATE INDEX IF NOT EXISTS idx_model_metering_health_tenant_run
+    ON model_metering_health (tenant_id, run_id, logical_call_id);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_evaluation_runs_tenant_run ON evaluation_runs (tenant_id, run_id);
 
 CREATE TABLE IF NOT EXISTS evaluation_run_items (

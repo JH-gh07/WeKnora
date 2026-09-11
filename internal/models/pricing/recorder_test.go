@@ -34,6 +34,9 @@ func (m *mockRepo) RecordMeteringAttempt(ctx context.Context, tenantID uint64, a
 func (m *mockRepo) GetMeasurementHealth(ctx context.Context, tenantID uint64, from, to time.Time) (*types.MeasurementHealth, error) {
 	return nil, nil
 }
+func (m *mockRepo) GetRunMeasurementHealth(ctx context.Context, tenantID uint64, runID string) (*types.MeasurementHealth, error) {
+	return nil, nil
+}
 
 func TestRecorderSelectedModelPriced(t *testing.T) {
 	repo := &mockRepo{}

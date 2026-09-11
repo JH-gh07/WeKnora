@@ -4,12 +4,42 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/golang-migrate/migrate/v4"
 	sqlite3migrate "github.com/golang-migrate/migrate/v4/database/sqlite3"
 	"github.com/stretchr/testify/require"
 )
+
+// TestPostgresModelCallMigrationsTolerateLegacyAutoMigrateSchema protects the
+// deployed upgrade path where the migration ledger is still at v89 but older
+// application startup code has already added the Task004/Task012 columns via
+// GORM AutoMigrate. Replaying v92/v94 must therefore be a no-op for existing
+// columns instead of leaving schema_migrations dirty.
+func TestPostgresModelCallMigrationsTolerateLegacyAutoMigrateSchema(t *testing.T) {
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	require.NoError(t, err)
+
+	for _, name := range []string{
+		"000092_model_call_reported_input.up.sql",
+		"000094_model_call_pricing_snapshot.up.sql",
+	} {
+		data, readErr := os.ReadFile(filepath.Join(repoRoot, "migrations", "versioned", name))
+		require.NoError(t, readErr)
+
+		addColumnCount := 0
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, "ALTER TABLE model_calls ADD COLUMN") {
+				continue
+			}
+			addColumnCount++
+			require.Contains(t, line, "ADD COLUMN IF NOT EXISTS", "%s must tolerate a column created by legacy AutoMigrate", name)
+		}
+		require.Positive(t, addColumnCount, "%s must contain at least one model_calls column addition", name)
+	}
+}
 
 func TestSQLiteMigrationsCreateModelCallsWithNullableUnknowns(t *testing.T) {
 	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))

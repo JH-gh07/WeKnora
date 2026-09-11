@@ -98,11 +98,13 @@ const (
 // Nullable usage and cost fields represent unknown values; zero is a real,
 // observed zero and must not be used as a stand-in for unavailable telemetry.
 type ModelCall struct {
-	ID       string  `json:"id" gorm:"column:id;primaryKey;type:varchar(36)"`
-	TenantID uint64  `json:"tenant_id" gorm:"column:tenant_id;index"`
-	RunID    *string `json:"run_id,omitempty" gorm:"column:run_id;type:varchar(36);index"`
-	TaskID   *string `json:"task_id,omitempty" gorm:"column:task_id;type:varchar(128);index"`
-	TraceID  string  `json:"trace_id,omitempty" gorm:"column:trace_id;type:varchar(128)"`
+	ID            string  `json:"id" gorm:"column:id;primaryKey;type:varchar(36)"`
+	TenantID      uint64  `json:"tenant_id" gorm:"column:tenant_id;index"`
+	RunID         *string `json:"run_id,omitempty" gorm:"column:run_id;type:varchar(36);index"`
+	ItemID        *string `json:"item_id,omitempty" gorm:"column:item_id;type:varchar(36);index"`
+	LogicalCallID string  `json:"logical_call_id,omitempty" gorm:"column:logical_call_id;type:varchar(36);index"`
+	TaskID        *string `json:"task_id,omitempty" gorm:"column:task_id;type:varchar(128);index"`
+	TraceID       string  `json:"trace_id,omitempty" gorm:"column:trace_id;type:varchar(128)"`
 
 	ModelID   string         `json:"model_id" gorm:"column:model_id;type:varchar(128);index"`
 	ModelName string         `json:"model_name" gorm:"column:model_name;type:varchar(256)"`
@@ -184,15 +186,17 @@ type ModelUsageAggregate struct {
 	// PricedCallCount and PricingUnknownReasonCounts are additive diagnostics:
 	// how many calls carry a PRICED fact and, for UNKNOWN rows, the fail-closed
 	// reason distribution. They never change the cost total semantics above.
-	PricedCallCount            int64                   `json:"priced_call_count"`
-	PricingUnknownReasonCounts map[string]int64        `json:"pricing_unknown_reason_counts,omitempty"`
-	CacheEligibleCount         int64                   `json:"cache_eligible_count"`
-	CacheReportedCount         int64                   `json:"cache_reported_count"`
-	CacheUnsupportedCount      int64                   `json:"cache_unsupported_count"`
-	MeasurementStatus          MeasurementHealthStatus `json:"measurement_status"`
-	MeteringAttemptedCount     int64                   `json:"metering_attempted_count"`
-	MeteringPersistedCount     int64                   `json:"metering_persisted_count"`
-	MeteringFailedCount        int64                   `json:"metering_failed_count"`
+	PricedCallCount                  int64                   `json:"priced_call_count"`
+	PricingUnknownReasonCounts       map[string]int64        `json:"pricing_unknown_reason_counts,omitempty"`
+	CacheEligibleCount               int64                   `json:"cache_eligible_count"`
+	CacheReportedCount               int64                   `json:"cache_reported_count"`
+	CacheUnsupportedCount            int64                   `json:"cache_unsupported_count"`
+	MeasurementStatus                MeasurementHealthStatus `json:"measurement_status"`
+	MeteringAttemptedCount           int64                   `json:"metering_attempted_count"`
+	MeteringPersistedCount           int64                   `json:"metering_persisted_count"`
+	MeteringFailedCount              int64                   `json:"metering_failed_count"`
+	ExpectedLogicalCallCount         int64                   `json:"expected_logical_calls"`
+	UnobservableProviderAttemptCount int64                   `json:"unobservable_provider_attempt_count"`
 	// LocalEmbeddingCache is the additive local-cache fact. It is always
 	// present (never merged into the Prompt Cache fields above) and reports
 	// DISABLED when the capability is implemented but the rollout switch is
@@ -201,11 +205,14 @@ type ModelUsageAggregate struct {
 }
 
 type MeasurementHealth struct {
-	TenantID               uint64                  `json:"tenant_id"`
-	From                   time.Time               `json:"from"`
-	To                     time.Time               `json:"to"`
-	MeteringAttemptedCount int64                   `json:"metering_attempted_count"`
-	MeteringPersistedCount int64                   `json:"metering_persisted_count"`
-	MeteringFailedCount    int64                   `json:"metering_failed_count"`
-	Status                 MeasurementHealthStatus `json:"measurement_status"`
+	TenantID                         uint64                  `json:"tenant_id"`
+	RunID                            string                  `json:"run_id,omitempty"`
+	From                             time.Time               `json:"from"`
+	To                               time.Time               `json:"to"`
+	MeteringAttemptedCount           int64                   `json:"metering_attempted_count"`
+	MeteringPersistedCount           int64                   `json:"metering_persisted_count"`
+	MeteringFailedCount              int64                   `json:"metering_failed_count"`
+	ExpectedLogicalCallCount         int64                   `json:"expected_logical_calls"`
+	UnobservableProviderAttemptCount int64                   `json:"unobservable_provider_attempt_count"`
+	Status                           MeasurementHealthStatus `json:"measurement_status"`
 }

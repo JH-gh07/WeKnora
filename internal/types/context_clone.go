@@ -83,9 +83,10 @@ var contextCloneAcrossDetach = map[ContextKey]bool{
 	// Evaluation/model-call attribution must follow work that is deliberately
 	// detached from its request. Losing these identifiers would persist the
 	// same call as ordinary run_id=NULL traffic after the detach boundary.
-	LLMRunIDContextKey:   true,
-	LLMTaskIDContextKey:  true,
-	LLMTraceIDContextKey: true,
+	LLMRunIDContextKey:         true,
+	LLMTaskIDContextKey:        true,
+	LLMTraceIDContextKey:       true,
+	EvaluationItemIDContextKey: true,
 	// Marks a channel that cannot resolve an in-conversation MCP OAuth prompt
 	// (an IM bot has no live client to click "Authorize"). Dropping it makes
 	// the agent block on the OAuth wait for every unauthorized service instead

@@ -82,6 +82,10 @@ type ParsedChunk struct {
 	Images        []ParsedImage
 	ChunkID       string // populated by processChunks with the actual DB UUID
 
+	// SourcePassageID is the stable lineage identity of the passage this chunk
+	// was split from (Task016 Step 3). Empty means "no lineage" (legacy).
+	SourcePassageID string
+
 	// ParentIndex is set when using parent-child chunking strategy.
 	// -1 (or unset/0 for flat chunks) means this is a top-level chunk.
 	// >= 0 means this is a child chunk referencing the parent at this index

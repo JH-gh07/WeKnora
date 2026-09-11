@@ -45,7 +45,15 @@ func newReportIntegrationEnv(t *testing.T) *reportIntegrationEnv {
 	// model_metering_health is created by the versioned migrations in
 	// production; here it is created by hand with the same schema so the
 	// tenant-window health observation is exercisable.
-	if err := db.Exec(`CREATE TABLE IF NOT EXISTS model_metering_health (id VARCHAR(36) PRIMARY KEY, tenant_id INTEGER NOT NULL, attempted_at DATETIME NOT NULL, persisted BOOLEAN NOT NULL)`).Error; err != nil {
+	if err := db.Exec(`CREATE TABLE IF NOT EXISTS model_metering_health (
+		id VARCHAR(36) PRIMARY KEY,
+		tenant_id INTEGER NOT NULL,
+		run_id VARCHAR(36),
+		item_id VARCHAR(36),
+		logical_call_id VARCHAR(36) NOT NULL DEFAULT '',
+		attempted_at DATETIME NOT NULL,
+		persisted BOOLEAN NOT NULL
+	)`).Error; err != nil {
 		t.Fatalf("create health table: %v", err)
 	}
 
@@ -132,7 +140,7 @@ func intPtr2(i int) *int         { return &i }
 func f64Ptr2(f float64) *float64 { return &f }
 
 func validMetricsJSON() types.JSON {
-	return types.JSON(`{"retrieval_metrics":{"precision":0.85,"recall":0.92,"ndcg3":0.88,"ndcg10":0.86,"mrr":0.95,"map":0.87},"generation_metrics":{"bleu1":0.72,"bleu2":0.65,"bleu4":0.58,"rouge1":0.78,"rouge2":0.71,"rougel":0.75}}`)
+	return types.JSON(`{"retrieval_metrics":{"legacy_nonstandard_precision":0.85,"recall":0.92,"ndcg3":0.88,"ndcg10":0.86,"mrr":0.95,"legacy_nonstandard_map":0.87},"generation_metrics":{"bleu1":0.72,"bleu2":0.65,"bleu4":0.58,"rouge1":0.78,"rouge2":0.71,"rougel":0.75}}`)
 }
 
 func completedRun(runID string, metricsValid bool, metrics types.JSON) *types.EvaluationRun {

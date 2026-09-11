@@ -157,6 +157,13 @@ type SearchResult struct {
 	KnowledgeID string `gorm:"column:knowledge_id"    json:"knowledge_id"`
 	// Chunk index
 	ChunkIndex int `gorm:"column:chunk_index"     json:"chunk_index"`
+	// SourcePassageID is the stable lineage identity of the passage this chunk
+	// was split from (Task016 Step 3, plan §3.2 / §4.2 方案 B). It is propagated
+	// verbatim from chunk creation through search/rerank so evaluation metrics
+	// can map a retrieved chunk back to its dataset passage WITHOUT content
+	// matching. Empty means "no lineage" (legacy results), which the metric hook
+	// treats as LINEAGE_UNAVAILABLE and never guesses.
+	SourcePassageID string `json:"source_passage_id,omitempty"`
 	// Knowledge title
 	KnowledgeTitle string `gorm:"column:knowledge_title" json:"knowledge_title"`
 	// Start at

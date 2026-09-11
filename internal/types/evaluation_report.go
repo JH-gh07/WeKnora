@@ -47,6 +47,7 @@ const (
 	ReasonProviderCacheUnsupported   = "PROVIDER_CACHE_UNSUPPORTED"
 	ReasonProviderCacheUnreported    = "PROVIDER_CACHE_UNREPORTED"
 	ReasonLocalCacheDisabled         = "LOCAL_CACHE_DISABLED"
+	ReasonMeasurementContractVersion = "NOT_COMPARABLE_MEASUREMENT_CONTRACT"
 )
 
 // ReportWarning is a stable, reason-coded warning attached to a report section.
@@ -80,6 +81,25 @@ type ReportQualitySection struct {
 	MetricsValid bool               `json:"metrics_valid"`
 	Retrieval    *RetrievalMetrics  `json:"retrieval,omitempty"`
 	Answer       *GenerationMetrics `json:"answer,omitempty"`
+	// MeasurementContractStatus mirrors the protocol snapshot's
+	// measurement_contract_status. "UNVERSIONED" (or empty for pre-v1 snapshots)
+	// means no metric artifact hash exists yet, so these quality numbers are
+	// NOT_COMPARABLE_MEASUREMENT_CONTRACT and must not enter a blocking quality
+	// comparison (Task016 Step 1 containment).
+	MeasurementContractStatus string `json:"measurement_contract_status,omitempty"`
+	// LegacyMetricDefinitions lists the retrieval metric JSON field names computed
+	// with legacy (non-standard) semantics. They are advisory-only and never
+	// blocking (Decision 016-4); standard metrics use separate names (Step 4).
+	LegacyMetricDefinitions []string `json:"legacy_metric_definitions,omitempty"`
+	// StandardRetrieval carries the standard measurement-contract/v1 retrieval
+	// metrics. Its field names (precision_at_10, map, ndcg_at_3, ...) are distinct
+	// from the legacy retrieval names (precision, map) — no name collision (AC07).
+	// Nil when the run has no standard metric computation yet.
+	StandardRetrieval *StandardRetrievalMetrics `json:"standard_retrieval,omitempty"`
+	// MeasurementContractHash is the SHA-256 of the measurement contract under
+	// which StandardRetrieval was computed. Empty for legacy/UNVERSIONED runs;
+	// non-empty and non-UNVERSIONED for new results (AC08, I04).
+	MeasurementContractHash string `json:"measurement_contract_hash,omitempty"`
 }
 
 // ReportUsageSection is the run_id-scoped observed usage fact.
@@ -121,6 +141,8 @@ type ReportSupportingSection struct {
 	PromptCache                     *ReportPromptCacheSupport `json:"prompt_cache,omitempty"`
 	LocalEmbeddingCache             *ReportLocalCacheSupport  `json:"local_embedding_cache,omitempty"`
 	RunMeasurementStatus            string                    `json:"run_measurement_status"`
+	RunMeasurementHealth            *ReportMeasurementHealth  `json:"run_measurement_health,omitempty"`
+	ProviderAttemptObservability    AttemptObservability      `json:"provider_attempt_observability"`
 	TenantWindowHealth              *ReportMeasurementHealth  `json:"tenant_window_health,omitempty"`
 	TenantWindowHealthIsNotRunScope bool                      `json:"tenant_window_health_is_not_run_completeness"`
 }
@@ -148,10 +170,13 @@ type ReportLocalCacheSupport struct {
 
 // ReportMeasurementHealth is the tenant-window metering health (NOT run-level).
 type ReportMeasurementHealth struct {
-	From                   string `json:"from"`
-	To                     string `json:"to"`
-	Status                 string `json:"status"`
-	MeteringAttemptedCount int64  `json:"metering_attempted_count"`
-	MeteringPersistedCount int64  `json:"metering_persisted_count"`
-	MeteringFailedCount    int64  `json:"metering_failed_count"`
+	RunID                            string `json:"run_id,omitempty"`
+	From                             string `json:"from"`
+	To                               string `json:"to"`
+	Status                           string `json:"status"`
+	MeteringAttemptedCount           int64  `json:"metering_attempted_count"`
+	MeteringPersistedCount           int64  `json:"metering_persisted_count"`
+	MeteringFailedCount              int64  `json:"metering_failed_count"`
+	ExpectedLogicalCallCount         int64  `json:"expected_logical_calls"`
+	UnobservableProviderAttemptCount int64  `json:"unobservable_provider_attempt_count"`
 }

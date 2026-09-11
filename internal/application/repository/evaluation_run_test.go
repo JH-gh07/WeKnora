@@ -18,10 +18,57 @@ func newTestRunDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&types.EvaluationRun{}); err != nil {
+	if err := db.AutoMigrate(&types.EvaluationRun{}, &types.EvaluationRunItem{}); err != nil {
 		t.Fatalf("automigrate: %v", err)
 	}
 	return db
+}
+
+func TestEvaluationRunCleanupFencingRejectsStaleOwner(t *testing.T) {
+	repo := NewEvaluationRunRepository(newTestRunDB(t))
+	ctx := context.Background()
+	run := newTestRun(1, "task-cleanup", "run-cleanup", types.EvaluationRunStatusCompleted)
+	if err := repo.Create(ctx, run); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	first, err := repo.ClaimCleanup(ctx, 1, run.RunID, "worker-a", time.Minute)
+	if err != nil {
+		t.Fatalf("first claim: %v", err)
+	}
+	if err := repo.UpdateCleanupStatusFenced(ctx, 1, run.RunID, "worker-b", first, types.CleanupStatusDone, ""); !errors.Is(err, ErrEvaluationRunFenced) {
+		t.Fatalf("foreign owner update = %v, want fenced", err)
+	}
+
+	// Expire the first lease and reclaim. Twenty stale writes must all be
+	// rejected, matching AC14's cleanup negative-control count.
+	db := newTestRunDB(t)
+	repo = NewEvaluationRunRepository(db)
+	run = newTestRun(1, "task-reclaim", "run-reclaim", types.EvaluationRunStatusCompleted)
+	if err := repo.Create(ctx, run); err != nil {
+		t.Fatalf("create reclaim: %v", err)
+	}
+	first, err = repo.ClaimCleanup(ctx, 1, run.RunID, "worker-a", time.Minute)
+	if err != nil {
+		t.Fatalf("claim a: %v", err)
+	}
+	if err := db.Model(&types.EvaluationRun{}).Where("tenant_id = ? AND run_id = ?", 1, run.RunID).Update("cleanup_lease_until", time.Now().Add(-time.Minute)).Error; err != nil {
+		t.Fatalf("expire: %v", err)
+	}
+	second, err := repo.ClaimCleanup(ctx, 1, run.RunID, "worker-b", time.Minute)
+	if err != nil {
+		t.Fatalf("claim b: %v", err)
+	}
+	if second <= first {
+		t.Fatalf("token did not advance: %d <= %d", second, first)
+	}
+	for i := 0; i < 20; i++ {
+		if err := repo.UpdateCleanupStatusFenced(ctx, 1, run.RunID, "worker-a", first, types.CleanupStatusDone, ""); !errors.Is(err, ErrEvaluationRunFenced) {
+			t.Fatalf("stale cleanup %d = %v, want fenced", i, err)
+		}
+	}
+	if err := repo.UpdateCleanupStatusFenced(ctx, 1, run.RunID, "worker-b", second, types.CleanupStatusDone, ""); err != nil {
+		t.Fatalf("current cleanup: %v", err)
+	}
 }
 
 func newTestRun(tenantID uint64, taskID, runID string, status types.EvaluationRunStatus) *types.EvaluationRun {

@@ -200,8 +200,8 @@ check_contract_tests_exist() {
   # These two regression tests close the final recovery/security review. Until
   # they exist, the verifier refuses to call the implementation frozen.
   for test in \
-    TestReconcileTemporaryResourceDoesNotMarkDoneOnFinderError \
-    TestReconciliationClearsPersistFailedAfterSuccessfulRewrite; do
+    TestReconcileTemporaryResourceTransientFinderErrorDoesNotMarkDone \
+    TestReconcileConvergesPersistFailedRun; do
     rg -q "func $test" internal/application || missing="$missing $test"
   done
   if [ -n "$missing" ]; then

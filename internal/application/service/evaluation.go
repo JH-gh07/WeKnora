@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"runtime"
 	"sync"
 	"time"
 
@@ -39,6 +37,8 @@ type EvaluationService struct {
 	tenantService        interfaces.TenantService        // Service for tenant lookup (reconciliation)
 	temporaryKBFinder    interfaces.TemporaryKnowledgeBaseFinder
 	runRepository        interfaces.EvaluationRunRepository
+	itemRepository       interfaces.EvaluationRunItemRepository
+	usageService         interfaces.ModelUsageService
 	buildInfo            EvaluationBuildInfo
 
 	evaluationMemoryStorage *evaluationMemoryStorage // In-process params cache (NOT the source of truth)
@@ -54,6 +54,8 @@ func NewEvaluationService(
 	tenantService interfaces.TenantService,
 	temporaryKBFinder interfaces.TemporaryKnowledgeBaseFinder,
 	runRepository interfaces.EvaluationRunRepository,
+	itemRepository interfaces.EvaluationRunItemRepository,
+	usageService interfaces.ModelUsageService,
 	buildInfo EvaluationBuildInfo,
 ) interfaces.EvaluationService {
 	evaluationMemoryStorage := newEvaluationMemoryStorage()
@@ -67,6 +69,8 @@ func NewEvaluationService(
 		tenantService:           tenantService,
 		temporaryKBFinder:       temporaryKBFinder,
 		runRepository:           runRepository,
+		itemRepository:          itemRepository,
+		usageService:            usageService,
 		buildInfo:               buildInfo,
 		evaluationMemoryStorage: evaluationMemoryStorage,
 	}
@@ -146,6 +150,8 @@ func mapRunToDetail(run *types.EvaluationRun) *types.EvaluationDetail {
 		detail.Task.ErrMsg = fmt.Sprintf("interrupted (%s)", reason)
 	} else if run.Status == types.EvaluationRunStatusFailed {
 		detail.Task.ErrMsg = run.ErrorMessage
+	} else if run.Status == types.EvaluationRunStatusPartial {
+		detail.Task.ErrMsg = "evaluation completed with partial item or measurement facts"
 	}
 
 	// Extract dataset_id from the protocol snapshot when present.
@@ -209,6 +215,10 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 	// Get tenant ID from context for multi-tenancy support
 	tenantID := types.MustTenantIDFromContext(ctx)
 	logger.Infof(ctx, "Tenant ID: %d", tenantID)
+	profile, err := evaluationExecutionProfileFromEnv()
+	if err != nil {
+		return nil, err
+	}
 
 	// Resolve models once.
 	models, err := e.modelService.ListModels(ctx)
@@ -300,31 +310,12 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 	detail.Task.RunID = runID
 
 	// Build protocol + provenance snapshots.
-	protocolJSON, protocolHash, err := buildProtocolSnapshot(protocolSnapshotInput{
-		DatasetID:             datasetID,
-		DatasetContentHash:    contentHash,
-		EmbeddingModelID:      embeddingModelID,
-		ChatModelID:           chatModelID,
-		RerankModelID:         rerankModelID,
-		SourceKnowledgeBaseID: knowledgeBaseID,
-		Params:                params,
-	})
+	protocolV2, protocolJSON, provenanceJSON, err := runtimeProtocolV2(
+		e.config, params, datasetID, contentHash, knowledgeBaseID, models,
+		[]string{embeddingModelID, chatModelID, rerankModelID}, profile, e.buildInfo,
+	)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to build protocol snapshot: %v", err)
-		return nil, err
-	}
-	provenanceJSON, err := buildRunProvenance(runProvenance{
-		SchemaVersion: evaluationProtocolSchemaVersion,
-		GitCommit:     e.buildInfo.GitCommit,
-		AppVersion:    e.buildInfo.AppVersion,
-		GoVersion:     runtime.Version(),
-		BuildTime:     e.buildInfo.BuildTime,
-		DBDriver:      os.Getenv("DB_DRIVER"),
-		StartedAt:     time.Now(),
-		Models:        modelRevisions(models, embeddingModelID, chatModelID, rerankModelID),
-	})
-	if err != nil {
-		logger.Errorf(ctx, "Failed to build provenance: %v", err)
 		return nil, err
 	}
 
@@ -333,7 +324,7 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 		RunID:                runID,
 		TaskID:               taskID,
 		TenantID:             tenantID,
-		ProtocolHash:         protocolHash,
+		ProtocolHash:         protocolV2.QualityHash,
 		ProtocolSnapshot:     protocolJSON,
 		RunProvenance:        provenanceJSON,
 		GitCommit:            e.buildInfo.GitCommit,
@@ -596,11 +587,27 @@ func (e *EvaluationService) EvalDataset(
 		return err
 	}
 	logger.Infof(ctx, "Dataset retrieved successfully with %d QA pairs", len(dataset))
+	if e.itemRepository == nil {
+		return errors.New("evaluation item repository is required")
+	}
+	profile, err := evaluationExecutionProfileFromEnv()
+	if err != nil {
+		return err
+	}
 
 	// Persist total QA pairs count.
 	run.TotalCount = len(dataset)
 	if err := e.persistRun(ctx, run); err != nil {
 		logger.Errorf(ctx, "Failed to persist total count: %v", err)
+	}
+	itemIndex := make(map[string]int, len(dataset))
+	for i, qaPair := range dataset {
+		itemID := evaluationItemID(run.RunID, qaPair.QID, i)
+		itemIndex[itemID] = i
+		err := e.itemRepository.CreateItem(ctx, &types.EvaluationRunItem{TenantID: run.TenantID, RunID: run.RunID, ItemID: itemID, Status: types.EvaluationItemStatusPending})
+		if err != nil && !errors.Is(err, repository.ErrEvaluationItemDuplicate) {
+			return fmt.Errorf("create evaluation item %s: %w", itemID, err)
+		}
 	}
 
 	// Extract and organize passages from dataset.
@@ -608,7 +615,8 @@ func (e *EvaluationService) EvalDataset(
 	logger.Infof(ctx, "Creating knowledge from %d passages", len(passages))
 
 	// Create knowledge base from passages (sync: wait for indexing to complete).
-	knowledge, err := e.knowledgeService.CreateKnowledgeFromPassageSync(ctx, knowledgeBaseID, passages, "")
+	setupCtx := types.WithEvaluationItemScope(ctx, "setup")
+	knowledge, err := e.knowledgeService.CreateKnowledgeFromPassageSync(setupCtx, knowledgeBaseID, passages, "")
 	if err != nil {
 		logger.Errorf(ctx, "Failed to create knowledge from passages")
 		return err
@@ -622,62 +630,89 @@ func (e *EvaluationService) EvalDataset(
 	var g errgroup.Group
 	metricHook := NewHookMetric(len(dataset))
 
-	// Set worker limit based on available CPUs.
-	g.SetLimit(max(runtime.GOMAXPROCS(0)-1, 1))
-	logger.Infof(ctx, "Starting evaluation with %d parallel workers", max(runtime.GOMAXPROCS(0)-1, 1))
-
-	// Process each QA pair in parallel.
-	for i, qaPair := range dataset {
-		qaPair := qaPair
-		i := i
+	logger.Infof(ctx, "Starting evaluation with %d explicit workers", profile.Workers)
+	for worker := 0; worker < profile.Workers; worker++ {
+		workerID := fmt.Sprintf("%s-%d", run.RunID, worker)
 		g.Go(func() error {
-			logger.Infof(ctx, "Processing QA pair %d, question: %s", i, qaPair.Question)
+			for {
+				claimed, claimErr := e.itemRepository.ClaimNextItem(ctx, run.TenantID, run.RunID, workerID, profile.LeaseTTL)
+				if errors.Is(claimErr, repository.ErrEvaluationItemNoClaimable) {
+					items, listErr := e.itemRepository.ListItems(ctx, run.TenantID, run.RunID)
+					if listErr != nil {
+						return listErr
+					}
+					aggregate, aggregateErr := AggregateRunItems(items, true)
+					if aggregateErr != nil {
+						return aggregateErr
+					}
+					if aggregate.Terminal == aggregate.Total {
+						return nil
+					}
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case <-time.After(min(profile.HeartbeatInterval, 250*time.Millisecond)):
+						continue
+					}
+				}
+				if claimErr != nil {
+					return claimErr
+				}
+				i, ok := itemIndex[claimed.ItemID]
+				if !ok {
+					return fmt.Errorf("claimed unknown item %s", claimed.ItemID)
+				}
+				qaPair := dataset[i]
+				itemCtx, cancel := context.WithCancel(types.WithEvaluationItemScope(ctx, claimed.ItemID))
+				heartbeatDone := make(chan error, 1)
+				go e.heartbeatEvaluationItem(itemCtx, heartbeatDone, run, claimed, workerID, profile)
+				logger.Infof(itemCtx, "Processing evaluation item %s", claimed.ItemID)
 
-			// Prepare chat management parameters for this QA pair.
-			chatManage := detail.Params.Clone()
-			chatManage.Query = qaPair.Question
-			chatManage.RewriteQuery = qaPair.Question
-			chatManage.KnowledgeBaseIDs = []string{knowledgeBaseID}
-			chatManage.SearchTargets = types.SearchTargets{
-				&types.SearchTarget{
-					Type:            types.SearchTargetTypeKnowledgeBase,
-					KnowledgeBaseID: knowledgeBaseID,
-				},
-			}
+				chatManage := detail.Params.Clone()
+				chatManage.Query = qaPair.Question
+				chatManage.RewriteQuery = qaPair.Question
+				chatManage.KnowledgeBaseIDs = []string{knowledgeBaseID}
+				chatManage.SearchTargets = types.SearchTargets{&types.SearchTarget{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: knowledgeBaseID}}
 
-			// Execute knowledge QA pipeline. The error is scoped to this
-			// closure (fixes the previous shared-`err` data race).
-			if err := e.sessionService.KnowledgeQAByEvent(ctx, chatManage, types.Pipline["rag"]); err != nil {
-				logger.Errorf(ctx, "Failed to process question %d", i)
-				return err
-			}
+				businessErr := e.sessionService.KnowledgeQAByEvent(itemCtx, chatManage, types.Pipline["rag"])
+				cancel()
+				heartbeatErr := <-heartbeatDone
+				if heartbeatErr != nil {
+					return heartbeatErr
+				}
+				if businessErr != nil {
+					failureJSON := types.JSON(`{"status":"FAILED_TERMINAL"}`)
+					if err := e.itemRepository.CommitTerminalItem(ctx, run.TenantID, run.RunID, claimed.ItemID, workerID, claimed.FencingToken, types.EvaluationItemStatusFailedTerm, failureJSON, digestV2(string(failureJSON)), "PIPELINE_FAILED"); err != nil {
+						return err
+					}
+					e.updateEvaluationProgress(ctx, run, &mu)
+					continue
+				}
 
-			// Record evaluation metrics.
-			metricHook.recordInit(i)
-			metricHook.recordQaPair(i, qaPair)
-			metricHook.recordSearchResult(i, chatManage.SearchResult)
-			metricHook.recordRerankResult(i, chatManage.RerankResult)
-			metricHook.recordChatResponse(i, chatManage.ChatResponse)
-			metricHook.recordFinish(i)
+				metricHook.recordInit(i)
+				metricHook.recordQaPair(i, qaPair)
+				metricHook.recordSearchResult(i, chatManage.SearchResult)
+				metricHook.recordRerankResult(i, chatManage.RerankResult)
+				metricHook.recordChatResponse(i, chatManage.ChatResponse)
+				itemResult := metricHook.recordFinish(i)
+				resultJSON, err := json.Marshal(itemResult)
+				if err != nil {
+					return err
+				}
+				if err := e.itemRepository.CommitTerminalItem(ctx, run.TenantID, run.RunID, claimed.ItemID, workerID, claimed.FencingToken, types.EvaluationItemStatusSucceeded, types.JSON(resultJSON), digestV2(string(resultJSON)), ""); err != nil {
+					return err
+				}
 
-			// Update and persist best-available progress. The shared run is
-			// mutated and the DB write is issued under the same mutex so that
-			// concurrent workers never race on run fields (or on the aggregate
-			// snapshot). The QA pipeline itself remains fully parallel.
-			mu.Lock()
-			finished++
-			metric := metricHook.MetricResult()
-			run.ProcessedCount = finished
-			run.FinishedCount = finished
-			if b, err := json.Marshal(metric); err == nil {
-				run.MetricsJSON = types.JSON(b)
+				mu.Lock()
+				finished++
+				run.ProcessedCount = finished
+				run.FinishedCount = finished
+				persistErr := e.persistRun(ctx, run)
+				mu.Unlock()
+				if persistErr != nil {
+					logger.Errorf(ctx, "Failed to persist progress: %v", persistErr)
+				}
 			}
-			persistErr := e.persistRun(ctx, run)
-			mu.Unlock()
-			if persistErr != nil {
-				logger.Errorf(ctx, "Failed to persist progress: %v", persistErr)
-			}
-			return nil
 		})
 	}
 
@@ -687,8 +722,23 @@ func (e *EvaluationService) EvalDataset(
 		return err
 	}
 
-	// Finalize: persist the durable metrics + COMPLETED state.
-	if err := e.persistCompleted(ctx, run, finished, metricHook.MetricResult()); err != nil {
+	items, err := e.itemRepository.ListItems(ctx, run.TenantID, run.RunID)
+	if err != nil {
+		return err
+	}
+	itemAggregate, err := AggregateRunItems(items, true)
+	if err != nil {
+		return err
+	}
+	metricsJSON, err := AggregateMetricsFromItemFacts(items)
+	if err != nil {
+		return err
+	}
+	e.applyRunMeasurement(ctx, run)
+	if run.MeasurementStatus == types.MeasurementStatusPartial && itemAggregate.Status == types.EvaluationRunStatusCompleted {
+		itemAggregate.Status = types.EvaluationRunStatusPartial
+	}
+	if err := e.persistTerminalAggregate(ctx, run, itemAggregate, metricsJSON); err != nil {
 		// The evaluation itself finished, but its terminal state could not be
 		// durably written. Fail-closed: mark FAILED with PERSISTENCE_FAILED so
 		// the durable row never pretends to be COMPLETED.
@@ -700,18 +750,84 @@ func (e *EvaluationService) EvalDataset(
 	return nil
 }
 
+func evaluationItemID(runID string, qid, index int) string {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(fmt.Sprintf("%s:%d:%d", runID, qid, index))).String()
+}
+
+func (e *EvaluationService) heartbeatEvaluationItem(ctx context.Context, done chan<- error, run *types.EvaluationRun, item *types.EvaluationRunItem, ownerID string, profile EvaluationExecutionProfile) {
+	ticker := time.NewTicker(profile.HeartbeatInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			done <- nil
+			return
+		case <-ticker.C:
+			if err := e.itemRepository.HeartbeatItem(context.WithoutCancel(ctx), run.TenantID, run.RunID, item.ItemID, ownerID, item.FencingToken, profile.LeaseTTL); err != nil {
+				done <- err
+				return
+			}
+		}
+	}
+}
+
+func (e *EvaluationService) updateEvaluationProgress(ctx context.Context, run *types.EvaluationRun, mu *sync.Mutex) {
+	mu.Lock()
+	defer mu.Unlock()
+	run.ProcessedCount++
+	run.FinishedCount++
+	if err := e.persistRun(ctx, run); err != nil {
+		logger.Errorf(ctx, "Failed to persist failed-item progress: %v", err)
+	}
+}
+
+func (e *EvaluationService) applyRunMeasurement(ctx context.Context, run *types.EvaluationRun) {
+	if e.usageService == nil {
+		run.MeasurementStatus = types.MeasurementStatusUnknown
+		return
+	}
+	health, err := e.usageService.RunHealth(ctx, run.TenantID, run.RunID)
+	if err != nil {
+		run.MeasurementStatus = types.MeasurementStatusUnknown
+		return
+	}
+	run.ExpectedLogicalCalls = health.ExpectedLogicalCallCount
+	run.MeteringAttemptedCount = health.MeteringAttemptedCount
+	run.MeteringPersistedCount = health.MeteringPersistedCount
+	run.MeteringFailedCount = health.MeteringFailedCount
+	run.UnobservableProviderAttemptCount = health.UnobservableProviderAttemptCount
+	switch health.Status {
+	case types.MeasurementHealthComplete:
+		run.MeasurementStatus = types.MeasurementStatusComplete
+	case types.MeasurementHealthPartial:
+		run.MeasurementStatus = types.MeasurementStatusPartial
+	default:
+		run.MeasurementStatus = types.MeasurementStatusUnknown
+	}
+}
+
+func (e *EvaluationService) persistTerminalAggregate(ctx context.Context, run *types.EvaluationRun, aggregate RunItemAggregate, metricsJSON types.JSON) error {
+	run.Status = aggregate.Status
+	run.TotalCount = aggregate.Total
+	run.ProcessedCount = aggregate.Terminal
+	run.FinishedCount = aggregate.Terminal
+	run.MetricsJSON = metricsJSON
+	run.MetricsValid = aggregate.Terminal == aggregate.Total
+	ended := time.Now()
+	run.EndedAt = &ended
+	return e.persistRun(ctx, run)
+}
+
 // persistCompleted records the terminal COMPLETED state with a durable,
 // reliable aggregate (metrics_valid=true). It returns an error if the terminal
 // write fails so the caller can fail-closed instead of pretending success.
 func (e *EvaluationService) persistCompleted(
-	ctx context.Context, run *types.EvaluationRun, finished int, metric *types.MetricResult,
+	ctx context.Context, run *types.EvaluationRun, finished int, metricsJSON types.JSON,
 ) error {
 	run.Status = types.EvaluationRunStatusCompleted
 	run.ProcessedCount = finished
 	run.FinishedCount = finished
-	if b, err := json.Marshal(metric); err == nil {
-		run.MetricsJSON = types.JSON(b)
-	}
+	run.MetricsJSON = metricsJSON
 	run.MetricsValid = true
 	ended := time.Now()
 	run.EndedAt = &ended
@@ -731,6 +847,17 @@ func (e *EvaluationService) persistCompleted(
 func (e *EvaluationService) cleanupTemporaryResources(
 	ctx context.Context, run *types.EvaluationRun, knowledgeID, knowledgeBaseID string,
 ) {
+	ownerID := "cleanup-" + uuid.NewString()
+	profile, profileErr := evaluationExecutionProfileFromEnv()
+	if profileErr != nil {
+		logger.Errorf(ctx, "Invalid cleanup execution profile: %v", profileErr)
+		return
+	}
+	cleanupToken, claimErr := e.runRepository.ClaimCleanup(context.WithoutCancel(ctx), run.TenantID, run.RunID, ownerID, profile.LeaseTTL)
+	if claimErr != nil {
+		logger.Warnf(ctx, "Cleanup claim rejected for run %s: %v", run.RunID, claimErr)
+		return
+	}
 	var anyFailed bool
 	var kbDeleteFailed bool
 	if knowledgeID != "" {
@@ -763,7 +890,7 @@ func (e *EvaluationService) cleanupTemporaryResources(
 			run.CleanupStatus = types.CleanupStatusDeleteRequested
 		}
 	}
-	if err := e.persistRun(ctx, run); err != nil {
+	if err := e.runRepository.UpdateCleanupStatusFenced(context.WithoutCancel(ctx), run.TenantID, run.RunID, ownerID, cleanupToken, run.CleanupStatus, run.TemporaryKBID); err != nil {
 		logger.Errorf(ctx, "Failed to persist cleanup status: %v", err)
 	}
 }
