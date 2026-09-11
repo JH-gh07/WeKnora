@@ -1,0 +1,15 @@
+version: 1
+student:
+  name: "JH-gh07"
+  github_id: "JH-gh07"
+topic:
+  id: "3"
+  title: "质量评测基线与成本可观测"
+result:
+  type: code
+  url: "https://github.com/JH-gh07/WeKnora/tree/rhino-2026-final-3"
+repository:
+  url: "https://github.com/JH-gh07/WeKnora"
+  branch: "feature/task016-truth-scale"
+  commit: "33f0b88f9837aa9edf07db4f4480221120a1cd54"
+  tag: "rhino-2026-final-3"
